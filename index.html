@@ -1863,6 +1863,8 @@ function render(){
 }
 function weeksOfMonth(){
   // group this month's days into weeks (Sun start)
+  // ※ローカル日付で整形（toISOStringはUTC変換で日本時間だと1日ズレるため使わない）
+  const fmtD=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
   const dm=dayMap();
   const days=data.days.filter(d=>monthOf(d.date)===cursor);
   if(!days.length)return[];
@@ -1874,7 +1876,7 @@ function weeksOfMonth(){
   while(cur<=end){
     const row=[];
     for(let i=0;i<7;i++){
-      const iso=cur.toISOString().slice(0,10);
+      const iso=fmtD(cur);
       row.push(dm[iso]||{date:iso,weekday:WD[cur.getDay()],assignments:[],_out:monthOf(iso)!==cursor});
       cur.setDate(cur.getDate()+1);
     }
@@ -2050,7 +2052,7 @@ document.getElementById('ovs').onclick=e=>{if(e.target.id==='ovs')document.getEl
 // ---------- nav / tabs ----------
 document.getElementById('prev').onclick=()=>{cursor=shiftMonth(cursor,-1);render()};
 document.getElementById('next').onclick=()=>{cursor=shiftMonth(cursor,1);render()};
-document.getElementById('today').onclick=()=>{const t=new Date().toISOString().slice(0,7);cursor=monthsList().includes(t)?t:monthsList()[0];render()};
+document.getElementById('today').onclick=()=>{const t=todayIso().slice(0,7);cursor=monthsList().includes(t)?t:monthsList()[0];render()};
 document.getElementById('reset').onclick=()=>{if(confirm('編集内容を破棄して、取込んだ元データに戻します。よろしいですか？')){data=JSON.parse(JSON.stringify(BASE_DATA));ptype=defaultTypes();save();render()}};
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
