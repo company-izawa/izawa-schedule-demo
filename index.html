@@ -55,6 +55,25 @@
           font-size:11px;color:#0369a1;font-weight:700}
   .facbox b{font-size:13px}
   .facn{font-weight:500;color:#334155;font-size:11px;line-height:1.35;margin-top:2px}
+  /* 現場ビュー：現場ごとに横一列のレーンへ揃える */
+  .week.scroll{overflow-x:auto}
+  .wgrid{display:grid;grid-template-columns:repeat(7,minmax(102px,1fr));min-width:770px}
+  .dhead{font-size:13px;font-weight:700;text-align:center;padding:7px 4px;background:#f8fafc;
+         border-left:1px solid var(--line);border-bottom:2px solid var(--line)}
+  .dhead:first-child{border-left:0}
+  .dhead.sun,.dhead.sun .wd{color:#dc2626}.dhead.sat,.dhead.sat .wd{color:#2563eb}
+  .dhead.today{background:#fff7ed;box-shadow:inset 0 -3px 0 #f59e0b}
+  .dhead .wd{font-size:11px;color:var(--sub);font-weight:600}
+  .lc{border-left:1px solid var(--line);border-top:1px solid var(--line);
+      padding:4px;cursor:pointer;min-height:30px;background:#fff;transition:.1s}
+  .lc:hover{background:#f8fbff;box-shadow:inset 0 0 0 2px #dbeafe}
+  .lc.off{background:#fafbfc}
+  .lc.today{background:#fffdf5}
+  .lc .site{margin-top:0}
+  .lc.fac{background:#f0fdff;border-top:2px solid #bae6fd}
+  .lc.fac.off{background:#f8fafc}
+  .facbox2{font-size:11px;color:#0369a1;font-weight:700}
+  .facbox2 b{font-size:13px}
   /* person + factory cells */
   .cellbox{min-height:78px;border-right:1px solid var(--line);border-top:1px solid var(--line);
            padding:6px;font-size:12px}
@@ -1864,38 +1883,48 @@ function weeksOfMonth(){
   return weeks;
 }
 function todayIso(){return new Date().toLocaleDateString('sv').slice(0,10)}
+function weekSites(w){
+  // 週内に登場する現場を、初出順に並べてレーン化（同じ現場＝同じ行に揃える）
+  const order=[],seen=new Set();
+  w.forEach(d=>d.assignments.forEach(a=>{if(!seen.has(a.site)){seen.add(a.site);order.push(a.site)}}));
+  return order;
+}
 function renderSite(){
   const weeks=weeksOfMonth();
   if(!weeks.length){main.innerHTML='<p style="color:#6b7280">この月のデータはありません。</p>';return}
   const T=todayIso(), residents=allPeople().filter(isResident);
   let html='';
   weeks.forEach(w=>{
-    html+='<div class="week"><div class="grid">';
-    // weekday header
-    html+=WD.map((x,i)=>`<div class="mh ${i===0?'sun':''} ${i===6?'sat':''}">${x}</div>`).join('');
-    w.forEach(d=>{
-      const {d:dd}=ymd(d.date);const wd=jsWd(d.date);
-      const cls=['day',wd===0?'sun':'',wd===6?'sat':'',d._out?'empty':'',d.date===T?'today':''].join(' ');
-      let sites='';
-      d.assignments.forEach(a=>{
-        const c=colorOf(a.site);
-        const chips=a.people.map(p=>`<span class="chip ${ptype[p]==='spot'?'spot':''}">${esc(p)}</span>`).join('');
-        sites+=`<div class="site" style="background:${c}"><span class="nm">${esc(a.site)}</span>${chips}</div>`;
+    const lanes=weekSites(w);
+    html+='<div class="week scroll"><div class="wgrid">';
+    // 日付ヘッダー
+    w.forEach(d=>{const wd=jsWd(d.date);const {d:dd}=ymd(d.date);
+      html+=`<div class="dhead ${wd===0?'sun':''} ${wd===6?'sat':''} ${d.date===T?'today':''}">${dd}<span class="wd"> ${WD[wd]}</span></div>`;});
+    // 現場レーン（横一列に揃う）
+    lanes.forEach(site=>{
+      const c=colorOf(site);
+      w.forEach(d=>{
+        const a=d.assignments.find(x=>x.site===site);
+        const t=d.date===T?'today':'';
+        if(a){
+          const chips=a.people.map(p=>`<span class="chip ${ptype[p]==='spot'?'spot':''}">${esc(p)}</span>`).join('');
+          html+=`<div class="lc ${t}" data-date="${d.date}"><div class="site" style="background:${c}"><span class="nm">${esc(site)}</span>${chips}</div></div>`;
+        }else html+=`<div class="lc off ${t}" data-date="${d.date}"></div>`;
       });
-      // 自社工場（その日現場が無い社員・常駐）— 稼働日のみ表示
+    });
+    // 自社工場レーン（毎日同じ位置・見やすく固定）
+    w.forEach(d=>{
+      const t=d.date===T?'today':'';
       if(!d._out && d.assignments.length){
         const onSite=new Set();d.assignments.forEach(a=>a.people.forEach(p=>onSite.add(p)));
         const fac=residents.filter(p=>!onSite.has(p));
-        sites+=`<div class="facbox">🏭 自社工場 <b>${fac.length}</b>名<div class="facn">${fac.map(esc).join('・')||'－'}</div></div>`;
-      }
-      html+=`<div class="${cls}" data-date="${d.date}">
-        <div class="dnum"><span>${dd}<span class="wd"> ${d.weekday}</span></span>
-        <span class="add-hint">＋編集</span></div>${sites}</div>`;
+        html+=`<div class="lc fac ${t}" data-date="${d.date}"><div class="facbox2">🏭 自社工場 <b>${fac.length}</b>名<div class="facn">${fac.map(esc).join('・')||'－'}</div></div></div>`;
+      }else html+=`<div class="lc fac off ${t}"><span class="count">－</span></div>`;
     });
     html+='</div></div>';
   });
   main.innerHTML=html;
-  main.querySelectorAll('.day').forEach(el=>el.onclick=()=>openEdit(el.dataset.date));
+  main.querySelectorAll('.lc[data-date]').forEach(el=>el.onclick=()=>openEdit(el.dataset.date));
 }
 function personDay(iso){
   const d=dayMap()[iso];
