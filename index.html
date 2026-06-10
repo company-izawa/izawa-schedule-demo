@@ -1,0 +1,2036 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>社内日程表デモ（ダミーデータ）</title>
+<style>
+  :root{
+    --bg:#f4f6f9; --panel:#ffffff; --line:#e3e8ef; --ink:#1f2937; --sub:#6b7280;
+    --accent:#2563eb; --factory:#0ea5e9; --rest:#9ca3af; --shadow:0 1px 3px rgba(16,24,40,.08);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI","Hiragino Kaku Gothic ProN","Meiryo",sans-serif;
+       background:var(--bg);color:var(--ink);-webkit-text-size-adjust:100%}
+  header{position:sticky;top:0;z-index:30;background:#0f172a;color:#fff;
+         padding:10px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.5px}
+  header .src{font-size:11px;color:#94a3b8}
+  .tabs{margin-left:auto;display:flex;gap:6px;background:#1e293b;padding:4px;border-radius:10px}
+  .tabs button{border:0;background:transparent;color:#cbd5e1;font-size:13px;font-weight:600;
+               padding:8px 14px;border-radius:7px;cursor:pointer;transition:.15s}
+  .tabs button.on{background:var(--accent);color:#fff}
+  .toolbar{background:var(--panel);border-bottom:1px solid var(--line);padding:8px 14px;
+           display:flex;align-items:center;gap:10px;flex-wrap:wrap;position:sticky;top:48px;z-index:20}
+  .toolbar .nav{display:flex;align-items:center;gap:6px}
+  .toolbar button.ghost{border:1px solid var(--line);background:#fff;border-radius:8px;
+        padding:6px 12px;cursor:pointer;font-size:14px;font-weight:600}
+  .toolbar button.ghost:hover{background:#f1f5f9}
+  .toolbar .cur{font-size:15px;font-weight:700;min-width:130px;text-align:center}
+  .toolbar .spacer{flex:1}
+  .pill{font-size:12px;color:var(--sub);background:#f1f5f9;border-radius:20px;padding:4px 10px}
+  main{padding:14px;max-width:1280px;margin:0 auto}
+  /* week section */
+  .week{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+        box-shadow:var(--shadow);margin-bottom:16px;overflow:hidden}
+  .week-h{padding:8px 12px;font-size:12px;font-weight:700;color:var(--sub);
+          background:#f8fafc;border-bottom:1px solid var(--line)}
+  .grid{display:grid;grid-template-columns:repeat(7,1fr)}
+  .day{min-height:120px;border-right:1px solid var(--line);border-top:1px solid var(--line);
+       padding:6px;cursor:pointer;transition:.1s;position:relative}
+  .day:hover{background:#f8fbff}
+  .day .dnum{font-size:13px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
+  .day .wd{font-size:11px;color:var(--sub)}
+  .day.sun .dnum{color:#dc2626}.day.sat .dnum{color:#2563eb}
+  .day.empty{background:#fafbfc}
+  .add-hint{opacity:0;font-size:11px;color:var(--accent);font-weight:700}
+  .day:hover .add-hint{opacity:1}
+  .site{margin-top:5px;border-radius:8px;padding:4px 6px;font-size:11.5px;line-height:1.35;color:#fff}
+  .site .nm{font-weight:700;display:block;margin-bottom:2px;font-size:11px}
+  .chip{display:inline-block;background:rgba(255,255,255,.22);border-radius:6px;
+        padding:1px 5px;margin:1px 2px 1px 0;font-size:11px}
+  .chip.spot{outline:1px dashed rgba(255,255,255,.7)}
+  .day.today{background:#fffdf5;box-shadow:inset 0 0 0 2px #fde68a}
+  .facbox{margin-top:6px;border-top:1px dashed var(--line);padding-top:5px;
+          font-size:11px;color:#0369a1;font-weight:700}
+  .facbox b{font-size:13px}
+  .facn{font-weight:500;color:#334155;font-size:11px;line-height:1.35;margin-top:2px}
+  /* person + factory cells */
+  .cellbox{min-height:78px;border-right:1px solid var(--line);border-top:1px solid var(--line);
+           padding:6px;font-size:12px}
+  .badge{display:inline-block;border-radius:7px;padding:3px 8px;font-size:12px;font-weight:700;color:#fff;margin-top:4px}
+  .badge.factory{background:var(--factory)}.badge.rest{background:var(--rest)}
+  .names{margin-top:4px;font-size:11.5px;color:var(--ink);line-height:1.4}
+  .count{font-size:11px;color:var(--sub)}
+  /* matrix (site view: 行=現場 / 列=曜日) */
+  .week.scroll{overflow-x:auto}
+  .matrix{display:grid;grid-template-columns:118px repeat(7,minmax(94px,1fr));min-width:760px}
+  .mh{font-size:13px;font-weight:700;text-align:center;padding:7px 4px;background:#f8fafc;
+      border-bottom:1px solid var(--line);border-left:1px solid var(--line);color:var(--ink)}
+  .mh.corner{border-left:0;background:#eef2f7;font-size:11px;color:var(--sub);display:flex;align-items:center;justify-content:center}
+  .mh.sun,.mh.sun .wd{color:#dc2626}.mh.sat,.mh.sat .wd{color:#2563eb}
+  .mh.today{background:#fff7ed;box-shadow:inset 0 -3px 0 #f59e0b}
+  .mh .wd{font-size:11px;color:var(--sub);font-weight:600}
+  .ml{font-size:12px;font-weight:700;padding:7px 8px;display:flex;align-items:center;
+      border-top:1px solid var(--line);line-height:1.25;word-break:break-all}
+  .mc{border-top:1px solid var(--line);border-left:1px solid var(--line);
+      padding:5px;min-height:44px;cursor:pointer;font-size:11.5px;background:#fff;transition:.1s}
+  .mc:hover{background:#f8fbff;box-shadow:inset 0 0 0 2px #dbeafe}
+  .mc.off{background:#fafbfc}.mc.today{background:#fffdf5}
+  .ml.facrow{background:#ecfeff;color:#0369a1}
+  .mc.facrow{background:#f0fdff;cursor:default;color:#0c4a6e;text-align:center}
+  .chip2{display:inline-block;background:#eef2f7;border-radius:5px;padding:1px 6px;margin:1px 3px 1px 0;font-size:11.5px;color:#1f2937}
+  .chip2.spot{border:1px dashed #94a3b8;background:#fff}
+  .cellbox.today{background:#fffdf5;box-shadow:inset 0 0 0 2px #fde68a}
+  /* selectors */
+  .people-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .ptag{border:1px solid var(--line);background:#fff;border-radius:20px;padding:6px 12px;
+        font-size:13px;font-weight:600;cursor:pointer}
+  .ptag.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .ptag.spot{border-style:dashed}
+  .legend{font-size:11px;color:var(--sub)}
+  .summary{display:flex;gap:14px;margin:6px 0 0}
+  .summary div{font-size:13px}.summary b{font-size:18px}
+  /* modal */
+  .ov{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:50;display:none;
+      align-items:flex-start;justify-content:center;padding:30px 14px;overflow:auto}
+  .ov.on{display:flex}
+  .modal{background:#fff;border-radius:14px;width:100%;max-width:520px;box-shadow:0 20px 50px rgba(0,0,0,.3)}
+  .modal h3{margin:0;padding:14px 16px;border-bottom:1px solid var(--line);font-size:15px}
+  .modal .body{padding:14px 16px;max-height:60vh;overflow:auto}
+  .modal .foot{padding:12px 16px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end}
+  .arow{border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:10px}
+  .arow input{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;font-size:14px;margin-top:4px}
+  .arow label{font-size:11px;color:var(--sub);font-weight:700}
+  .btn{border:0;border-radius:9px;padding:9px 16px;font-size:14px;font-weight:700;cursor:pointer}
+  .btn.primary{background:var(--accent);color:#fff}.btn.gray{background:#eef2f7;color:#334155}
+  .btn.danger{background:#fee2e2;color:#b91c1c}
+  .lnk{color:var(--accent);font-size:13px;cursor:pointer;font-weight:600;background:none;border:0}
+  .typesel{display:flex;align-items:center;gap:8px;justify-content:space-between;
+           padding:8px 0;border-bottom:1px dashed var(--line)}
+  .typesel select{border:1px solid var(--line);border-radius:8px;padding:6px;font-size:13px}
+  .note{font-size:11.5px;color:var(--sub);background:#fffbeb;border:1px solid #fde68a;
+        border-radius:8px;padding:8px 10px;margin-bottom:10px}
+  @media(max-width:760px){
+    .grid,.day .nm{font-size:11px}
+    .day{min-height:96px}
+    header h1{font-size:14px}.tabs button{padding:7px 10px}
+  }
+</style>
+</head>
+<body>
+<div style="background:#fef3c7;color:#92400e;font-size:12px;text-align:center;padding:6px;border-bottom:1px solid #fde68a">⚠ これは操作感確認用のデモです。表示中の現場名・人名はすべて架空のダミーデータです。</div>
+<header>
+  <h1>社内日程表 デモ</h1>
+  <span class="src" id="src"></span>
+  <div class="tabs">
+    <button data-v="site" class="on">現場ビュー</button>
+    <button data-v="person">個人ビュー</button>
+    <button data-v="factory">工場ビュー</button>
+  </div>
+</header>
+
+<div class="toolbar">
+  <div class="nav">
+    <button class="ghost" id="prev">‹</button>
+    <div class="cur" id="curMonth"></div>
+    <button class="ghost" id="next">›</button>
+    <button class="ghost" id="today">今日</button>
+  </div>
+  <div id="ctx" class="people-row"></div>
+  <div class="spacer"></div>
+  <button class="ghost" id="gear">⚙ 人員設定</button>
+  <button class="ghost" id="reset">元に戻す</button>
+</div>
+
+<main id="main"></main>
+
+<!-- edit modal -->
+<div class="ov" id="ov">
+  <div class="modal">
+    <h3 id="ovTitle">予定を編集</h3>
+    <div class="body" id="ovBody"></div>
+    <div class="foot">
+      <button class="btn gray" id="ovCancel">閉じる</button>
+      <button class="btn primary" id="ovSave">保存</button>
+    </div>
+  </div>
+</div>
+<!-- settings modal -->
+<div class="ov" id="ovs">
+  <div class="modal">
+    <h3>人員設定（種別）</h3>
+    <div class="body" id="ovsBody"></div>
+    <div class="foot">
+      <button class="btn gray" id="ovsClose">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const BASE_DATA = {
+ "title": "〇〇鉄工所　社内日程表（デモ）",
+ "source": "デモ用ダミーデータ（実データではありません）",
+ "days": [
+  {
+   "date": "2026-06-14",
+   "weekday": "日",
+   "assignments": []
+  },
+  {
+   "date": "2026-06-15",
+   "weekday": "月",
+   "assignments": [
+    {
+     "site": "A自動車 タービン解体",
+     "people": [
+      "佐藤",
+      "鈴木",
+      "高橋",
+      "田中"
+     ]
+    },
+    {
+     "site": "B自動車 第2工場",
+     "people": [
+      "渡辺",
+      "中村",
+      "小林",
+      "加藤",
+      "吉田"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-06-16",
+   "weekday": "火",
+   "assignments": [
+    {
+     "site": "A自動車 タービン解体",
+     "people": [
+      "佐藤",
+      "鈴木",
+      "高橋",
+      "田中",
+      "吉田"
+     ]
+    },
+    {
+     "site": "B自動車 第2工場",
+     "people": [
+      "中村",
+      "小林",
+      "加藤"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-06-17",
+   "weekday": "水",
+   "assignments": [
+    {
+     "site": "A自動車 タービン解体",
+     "people": [
+      "佐藤",
+      "山本",
+      "高橋",
+      "田中",
+      "吉田"
+     ]
+    },
+    {
+     "site": "C電装 幸田工場",
+     "people": [
+      "鈴木",
+      "協力A"
+     ]
+    },
+    {
+     "site": "B自動車 第2工場",
+     "people": [
+      "中村",
+      "小林",
+      "加藤"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-06-18",
+   "weekday": "木",
+   "assignments": [
+    {
+     "site": "A自動車 タービン解体",
+     "people": [
+      "佐藤",
+      "中村",
+      "高橋",
+      "田中",
+      "吉田",
+      "加藤"
+     ]
+    },
+    {
+     "site": "C電装 西尾工場",
+     "people": [
+      "松本",
+      "渡辺",
+      "井上"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-06-19",
+   "weekday": "金",
+   "assignments": [
+    {
+     "site": "A自動車 タービン解体",
+     "people": [
+      "佐藤",
+      "中村",
+      "田中",
+      "吉田",
+      "加藤"
+     ]
+    },
+    {
+     "site": "C電装 西尾工場",
+     "people": [
+      "松本",
+      "渡辺",
+      "井上",
+      "協力B4",
+      "高橋"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-06-20",
+   "weekday": "土",
+   "assignments": [
+    {
+     "site": "A自動車 タービン解体",
+     "people": [
+      "佐藤",
+      "中村",
+      "木村",
+      "田中",
+      "吉田",
+      "加藤"
+     ]
+    },
+    {
+     "site": "C電装 西尾工場",
+     "people": [
+      "松本",
+      "渡辺",
+      "井上",
+      "協力B4",
+      "高橋",
+      "木村"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-06-21",
+   "weekday": "日",
+   "assignments": [
+    {
+     "site": "C電装 西尾工場",
+     "people": [
+      "松本",
+      "井上",
+      "協力B4",
+      "高橋"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-06-22",
+   "weekday": "月",
+   "assignments": [
+    {
+     "site": "A自動車 タービン解体",
+     "people": [
+      "佐藤",
+      "中村",
+      "田中",
+      "高橋"
+     ]
+    },
+    {
+     "site": "C電装 西尾工場",
+     "people": [
+      "松本",
+      "井上",
+      "協力B4"
+     ]
+    },
+    {
+     "site": "D製紙 可児工場",
+     "people": [
+      "渡辺",
+      "小林",
+      "加藤"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-06-23",
+   "weekday": "火",
+   "assignments": [
+    {
+     "site": "A自動車 タービン解体",
+     "people": [
+      "佐藤",
+      "中村",
+      "田中",
+      "高橋"
+     ]
+    },
+    {
+     "site": "D製紙 可児工場",
+     "people": [
+      "渡辺",
+      "山本",
+      "木村",
+      "小林",
+      "加藤",
+      "吉田"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-06-24",
+   "weekday": "水",
+   "assignments": [
+    {
+     "site": "A自動車 タービン解体",
+     "people": [
+      "佐藤",
+      "中村",
+      "田中",
+      "高橋"
+     ]
+    },
+    {
+     "site": "C電装 西尾工場",
+     "people": [
+      "松本",
+      "協力B4"
+     ]
+    },
+    {
+     "site": "D製紙 可児工場",
+     "people": [
+      "渡辺",
+      "山本",
+      "木村",
+      "小林",
+      "加藤",
+      "吉田",
+      "応援2"
+     ]
+    },
+    {
+     "site": "E鋼板 市川工場",
+     "people": [
+      "鈴木",
+      "協力A"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-06-25",
+   "weekday": "木",
+   "assignments": [
+    {
+     "site": "A自動車 タービン解体",
+     "people": [
+      "佐藤",
+      "中村",
+      "田中",
+      "高橋"
+     ]
+    },
+    {
+     "site": "C電装 西尾工場",
+     "people": [
+      "松本",
+      "協力B4"
+     ]
+    },
+    {
+     "site": "D製紙 可児工場",
+     "people": [
+      "渡辺",
+      "山本",
+      "木村",
+      "小林",
+      "加藤",
+      "吉田",
+      "応援2"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-06-26",
+   "weekday": "金",
+   "assignments": [
+    {
+     "site": "A自動車 タービン解体",
+     "people": [
+      "佐藤",
+      "中村",
+      "田中",
+      "高橋"
+     ]
+    },
+    {
+     "site": "C電装 西尾工場",
+     "people": [
+      "松本",
+      "協力B4"
+     ]
+    },
+    {
+     "site": "D製紙 可児工場",
+     "people": [
+      "渡辺",
+      "山本",
+      "木村",
+      "小林",
+      "加藤",
+      "吉田",
+      "応援2"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-06-27",
+   "weekday": "土",
+   "assignments": [
+    {
+     "site": "A自動車 タービン解体",
+     "people": [
+      "佐藤",
+      "中村",
+      "田中",
+      "高橋"
+     ]
+    },
+    {
+     "site": "C電装 西尾工場",
+     "people": [
+      "松本",
+      "協力B4"
+     ]
+    },
+    {
+     "site": "D製紙 可児工場",
+     "people": [
+      "渡辺",
+      "山本",
+      "木村",
+      "小林",
+      "加藤",
+      "吉田"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-06-28",
+   "weekday": "日",
+   "assignments": [
+    {
+     "site": "C電装 西尾工場",
+     "people": [
+      "松本",
+      "協力B4"
+     ]
+    },
+    {
+     "site": "D製紙 可児工場",
+     "people": [
+      "渡辺",
+      "山本",
+      "木村",
+      "小林",
+      "加藤",
+      "吉田"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-06-29",
+   "weekday": "月",
+   "assignments": [
+    {
+     "site": "A自動車 タービン解体",
+     "people": [
+      "佐藤",
+      "中村",
+      "田中"
+     ]
+    },
+    {
+     "site": "D製紙 可児工場",
+     "people": [
+      "渡辺",
+      "山本",
+      "木村",
+      "小林",
+      "加藤",
+      "吉田"
+     ]
+    },
+    {
+     "site": "E鋼板 市川工場",
+     "people": [
+      "鈴木",
+      "松本",
+      "高橋",
+      "+α"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-06-30",
+   "weekday": "火",
+   "assignments": [
+    {
+     "site": "A自動車 タービン解体",
+     "people": [
+      "佐藤",
+      "中村",
+      "田中",
+      "高橋"
+     ]
+    },
+    {
+     "site": "E鋼板 市川工場",
+     "people": [
+      "鈴木",
+      "協力A"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-01",
+   "weekday": "水",
+   "assignments": [
+    {
+     "site": "A自動車 タービン解体",
+     "people": [
+      "佐藤",
+      "中村",
+      "田中"
+     ]
+    },
+    {
+     "site": "C電装 西尾工場",
+     "people": [
+      "松本",
+      "高橋",
+      "協力B3",
+      "小林",
+      "加藤"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-02",
+   "weekday": "木",
+   "assignments": [
+    {
+     "site": "A自動車 タービン解体",
+     "people": [
+      "佐藤",
+      "中村",
+      "田中"
+     ]
+    },
+    {
+     "site": "C電装 西尾工場",
+     "people": [
+      "松本",
+      "高橋",
+      "協力B3",
+      "小林",
+      "加藤"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-03",
+   "weekday": "金",
+   "assignments": [
+    {
+     "site": "A自動車 タービン解体",
+     "people": [
+      "佐藤",
+      "中村",
+      "田中"
+     ]
+    },
+    {
+     "site": "C電装 西尾工場",
+     "people": [
+      "松本",
+      "高橋",
+      "協力B3",
+      "小林",
+      "加藤"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-04",
+   "weekday": "土",
+   "assignments": [
+    {
+     "site": "A自動車 タービン解体",
+     "people": [
+      "中村",
+      "木村",
+      "田中"
+     ]
+    },
+    {
+     "site": "C電装 西尾工場",
+     "people": [
+      "松本",
+      "高橋",
+      "協力B3",
+      "小林",
+      "加藤"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-05",
+   "weekday": "日",
+   "assignments": [
+    {
+     "site": "C電装 西尾工場",
+     "people": [
+      "松本",
+      "高橋",
+      "協力B3",
+      "小林",
+      "加藤"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-06",
+   "weekday": "月",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "佐藤"
+     ]
+    },
+    {
+     "site": "C電装 西尾工場",
+     "people": [
+      "松本",
+      "高橋",
+      "協力B3",
+      "小林",
+      "加藤"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-07",
+   "weekday": "火",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "佐藤"
+     ]
+    },
+    {
+     "site": "C電装 西尾工場",
+     "people": [
+      "松本",
+      "高橋",
+      "協力B3",
+      "小林",
+      "加藤"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-08",
+   "weekday": "水",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "佐藤",
+      "協力C2",
+      "渡辺"
+     ]
+    },
+    {
+     "site": "C電装 西尾工場",
+     "people": [
+      "松本",
+      "高橋",
+      "協力B3",
+      "小林",
+      "加藤"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-09",
+   "weekday": "木",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "渡辺"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-10",
+   "weekday": "金",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "渡辺"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-11",
+   "weekday": "土",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "渡辺"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-12",
+   "weekday": "日",
+   "assignments": []
+  },
+  {
+   "date": "2026-07-13",
+   "weekday": "月",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "佐藤",
+      "協力C2",
+      "高橋"
+     ]
+    },
+    {
+     "site": "C電装 幸田工場",
+     "people": [
+      "鈴木",
+      "協力A"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-14",
+   "weekday": "火",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "佐藤",
+      "協力C2",
+      "高橋"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-15",
+   "weekday": "水",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "佐藤",
+      "協力C2",
+      "高橋"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-16",
+   "weekday": "木",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "佐藤",
+      "協力C2",
+      "高橋"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-17",
+   "weekday": "金",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "佐藤",
+      "協力C2",
+      "高橋"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-18",
+   "weekday": "土",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "佐藤",
+      "協力C2",
+      "高橋"
+     ]
+    },
+    {
+     "site": "C電装 幸田工場",
+     "people": [
+      "鈴木",
+      "協力A"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-19",
+   "weekday": "日",
+   "assignments": []
+  },
+  {
+   "date": "2026-07-20",
+   "weekday": "月",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B3"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-21",
+   "weekday": "火",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B3"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-22",
+   "weekday": "水",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B3"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-23",
+   "weekday": "木",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B3"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-24",
+   "weekday": "金",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B3"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-25",
+   "weekday": "土",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B3"
+     ]
+    },
+    {
+     "site": "C電装 幸田工場",
+     "people": [
+      "鈴木",
+      "協力A"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-26",
+   "weekday": "日",
+   "assignments": []
+  },
+  {
+   "date": "2026-07-27",
+   "weekday": "月",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B3"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-28",
+   "weekday": "火",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B3"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-29",
+   "weekday": "水",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B3"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-30",
+   "weekday": "木",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B3"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-07-31",
+   "weekday": "金",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B3"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-08-01",
+   "weekday": "土",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B3"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-08-02",
+   "weekday": "日",
+   "assignments": []
+  },
+  {
+   "date": "2026-08-03",
+   "weekday": "月",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B4"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-08-04",
+   "weekday": "火",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B4"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-08-05",
+   "weekday": "水",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B4"
+     ]
+    },
+    {
+     "site": "C電装 幸田工場",
+     "people": [
+      "鈴木",
+      "協力A"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-08-06",
+   "weekday": "木",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B4"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-08-07",
+   "weekday": "金",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B4"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-08-08",
+   "weekday": "土",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B4"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-08-09",
+   "weekday": "日",
+   "assignments": []
+  },
+  {
+   "date": "2026-08-10",
+   "weekday": "月",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B4"
+     ]
+    },
+    {
+     "site": "G電線 三重工場",
+     "people": []
+    }
+   ]
+  },
+  {
+   "date": "2026-08-11",
+   "weekday": "火",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B4"
+     ]
+    },
+    {
+     "site": "G電線 三重工場",
+     "people": []
+    }
+   ]
+  },
+  {
+   "date": "2026-08-12",
+   "weekday": "水",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B4"
+     ]
+    },
+    {
+     "site": "G電線 三重工場",
+     "people": []
+    }
+   ]
+  },
+  {
+   "date": "2026-08-13",
+   "weekday": "木",
+   "assignments": [
+    {
+     "site": "G電線 三重工場",
+     "people": []
+    }
+   ]
+  },
+  {
+   "date": "2026-08-14",
+   "weekday": "金",
+   "assignments": [
+    {
+     "site": "G電線 三重工場",
+     "people": []
+    }
+   ]
+  },
+  {
+   "date": "2026-08-15",
+   "weekday": "土",
+   "assignments": [
+    {
+     "site": "G電線 三重工場",
+     "people": []
+    }
+   ]
+  },
+  {
+   "date": "2026-08-16",
+   "weekday": "日",
+   "assignments": [
+    {
+     "site": "G電線 三重工場",
+     "people": []
+    }
+   ]
+  },
+  {
+   "date": "2026-08-17",
+   "weekday": "月",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C4",
+      "高橋",
+      "松本"
+     ]
+    },
+    {
+     "site": "G電線 三重工場",
+     "people": []
+    }
+   ]
+  },
+  {
+   "date": "2026-08-18",
+   "weekday": "火",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C4",
+      "高橋",
+      "松本"
+     ]
+    },
+    {
+     "site": "G電線 三重工場",
+     "people": []
+    }
+   ]
+  },
+  {
+   "date": "2026-08-19",
+   "weekday": "水",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C4",
+      "高橋",
+      "松本"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-08-20",
+   "weekday": "木",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C4",
+      "高橋",
+      "松本"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-08-21",
+   "weekday": "金",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C4",
+      "高橋",
+      "松本"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-08-22",
+   "weekday": "土",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C4",
+      "高橋",
+      "松本"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-08-23",
+   "weekday": "日",
+   "assignments": []
+  },
+  {
+   "date": "2026-08-24",
+   "weekday": "月",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C4",
+      "高橋",
+      "松本"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-08-25",
+   "weekday": "火",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C4",
+      "高橋",
+      "松本"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-08-26",
+   "weekday": "水",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C4",
+      "高橋",
+      "松本"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-08-27",
+   "weekday": "木",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C4",
+      "高橋",
+      "松本"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-08-28",
+   "weekday": "金",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C4",
+      "高橋",
+      "松本"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-08-29",
+   "weekday": "土",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C4",
+      "高橋",
+      "松本"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-08-30",
+   "weekday": "日",
+   "assignments": []
+  },
+  {
+   "date": "2026-08-31",
+   "weekday": "月",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B4"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-09-01",
+   "weekday": "火",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B4"
+     ]
+    },
+    {
+     "site": "B自動車 第2工場",
+     "people": [
+      "中村"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-09-02",
+   "weekday": "水",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B4"
+     ]
+    },
+    {
+     "site": "B自動車 第2工場",
+     "people": [
+      "中村"
+     ]
+    },
+    {
+     "site": "H充てん所",
+     "people": [
+      "木村",
+      "吉田"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-09-03",
+   "weekday": "木",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B4"
+     ]
+    },
+    {
+     "site": "B自動車 第2工場",
+     "people": [
+      "中村"
+     ]
+    },
+    {
+     "site": "H充てん所",
+     "people": [
+      "木村",
+      "吉田"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-09-04",
+   "weekday": "金",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B4"
+     ]
+    },
+    {
+     "site": "B自動車 第2工場",
+     "people": [
+      "中村"
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026-09-05",
+   "weekday": "土",
+   "assignments": [
+    {
+     "site": "Fセメント 藤原工場",
+     "people": [
+      "清水",
+      "山本",
+      "佐藤",
+      "協力C2",
+      "高橋",
+      "協力B4"
+     ]
+    },
+    {
+     "site": "B自動車 第2工場",
+     "people": [
+      "中村"
+     ]
+    },
+    {
+     "site": "H充てん所",
+     "people": [
+      "木村",
+      "吉田"
+     ]
+    }
+   ]
+  }
+ ]
+};
+const LS_DATA="izawademo_sched_v1", LS_TYPE="izawademo_ptype_v1";
+const TYPES={emp:"社員",res:"常駐外注",spot:"スポット(会社)"};
+// ---------- state ----------
+let data = load(LS_DATA) || JSON.parse(JSON.stringify(BASE_DATA));
+let ptype = load(LS_TYPE) || defaultTypes();
+let view="site", curPerson=null;
+let cursor = monthOf(data.days.find(d=>d.assignments.length)?.date || data.days[0].date);
+
+function load(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}}
+function save(){localStorage.setItem(LS_DATA,JSON.stringify(data));localStorage.setItem(LS_TYPE,JSON.stringify(ptype))}
+function defaultTypes(){
+  const t={};
+  allPeople().forEach(p=>{
+    t[p] = (/\d$/.test(p)||/センバ|応援|新興|α/.test(p)) ? "spot" : "emp";
+  });
+  return t;
+}
+function allPeople(){
+  const s=new Set();
+  BASE_DATA.days.forEach(d=>d.assignments.forEach(a=>a.people.forEach(p=>s.add(p))));
+  (data?.days||[]).forEach(d=>d.assignments.forEach(a=>a.people.forEach(p=>s.add(p))));
+  return [...s].sort((a,b)=>a.localeCompare(b,'ja'));
+}
+function isResident(p){return ptype[p]==="emp"||ptype[p]==="res"}
+// ---------- date helpers ----------
+function monthOf(iso){return iso.slice(0,7)}
+function ymd(iso){const[y,m,d]=iso.split('-').map(Number);return{y,m,d}}
+function dayMap(){const m={};data.days.forEach(d=>m[d.date]=d);return m}
+const WD=['日','月','火','水','木','金','土'];
+function jsWd(iso){return new Date(iso+'T00:00:00').getDay()}
+function monthsList(){
+  const s=new Set(data.days.map(d=>monthOf(d.date)));return [...s].sort();
+}
+function shiftMonth(ym,delta){
+  let[y,m]=ym.split('-').map(Number);m+=delta;while(m<1){m+=12;y--}while(m>12){m-=12;y++}
+  return y+'-'+String(m).padStart(2,'0');
+}
+// ---------- color ----------
+const PALETTE=["#2563eb","#0891b2","#7c3aed","#db2777","#ea580c","#16a34a",
+ "#ca8a04","#dc2626","#0d9488","#4f46e5","#9333ea","#b45309","#475569"];
+const siteColors={};let ci=0;
+function colorOf(site){if(!siteColors[site]){siteColors[site]=PALETTE[ci%PALETTE.length];ci++}return siteColors[site]}
+// ---------- render ----------
+const main=document.getElementById('main');
+document.getElementById('src').textContent=BASE_DATA.source;
+function render(){
+  document.getElementById('curMonth').textContent=cursor.replace('-','年')+'月';
+  buildCtx();
+  if(view==='site')renderSite();
+  else if(view==='person')renderPerson();
+  else renderFactory();
+}
+function weeksOfMonth(){
+  // group this month's days into weeks (Sun start)
+  const dm=dayMap();
+  const days=data.days.filter(d=>monthOf(d.date)===cursor);
+  if(!days.length)return[];
+  // build full calendar weeks covering these days
+  const first=days[0].date, last=days[days.length-1].date;
+  let start=new Date(first+'T00:00:00');start.setDate(start.getDate()-jsWd(first));
+  let end=new Date(last+'T00:00:00');end.setDate(end.getDate()+(6-jsWd(last)));
+  const weeks=[];let cur=new Date(start);
+  while(cur<=end){
+    const row=[];
+    for(let i=0;i<7;i++){
+      const iso=cur.toISOString().slice(0,10);
+      row.push(dm[iso]||{date:iso,weekday:WD[cur.getDay()],assignments:[],_out:monthOf(iso)!==cursor});
+      cur.setDate(cur.getDate()+1);
+    }
+    weeks.push(row);
+  }
+  return weeks;
+}
+function todayIso(){return new Date().toLocaleDateString('sv').slice(0,10)}
+function renderSite(){
+  const weeks=weeksOfMonth();
+  if(!weeks.length){main.innerHTML='<p style="color:#6b7280">この月のデータはありません。</p>';return}
+  const T=todayIso(), residents=allPeople().filter(isResident);
+  let html='';
+  weeks.forEach(w=>{
+    html+='<div class="week"><div class="grid">';
+    // weekday header
+    html+=WD.map((x,i)=>`<div class="mh ${i===0?'sun':''} ${i===6?'sat':''}">${x}</div>`).join('');
+    w.forEach(d=>{
+      const {d:dd}=ymd(d.date);const wd=jsWd(d.date);
+      const cls=['day',wd===0?'sun':'',wd===6?'sat':'',d._out?'empty':'',d.date===T?'today':''].join(' ');
+      let sites='';
+      d.assignments.forEach(a=>{
+        const c=colorOf(a.site);
+        const chips=a.people.map(p=>`<span class="chip ${ptype[p]==='spot'?'spot':''}">${esc(p)}</span>`).join('');
+        sites+=`<div class="site" style="background:${c}"><span class="nm">${esc(a.site)}</span>${chips}</div>`;
+      });
+      // 自社工場（その日現場が無い社員・常駐）— 稼働日のみ表示
+      if(!d._out && d.assignments.length){
+        const onSite=new Set();d.assignments.forEach(a=>a.people.forEach(p=>onSite.add(p)));
+        const fac=residents.filter(p=>!onSite.has(p));
+        sites+=`<div class="facbox">🏭 自社工場 <b>${fac.length}</b>名<div class="facn">${fac.map(esc).join('・')||'－'}</div></div>`;
+      }
+      html+=`<div class="${cls}" data-date="${d.date}">
+        <div class="dnum"><span>${dd}<span class="wd"> ${d.weekday}</span></span>
+        <span class="add-hint">＋編集</span></div>${sites}</div>`;
+    });
+    html+='</div></div>';
+  });
+  main.innerHTML=html;
+  main.querySelectorAll('.day').forEach(el=>el.onclick=()=>openEdit(el.dataset.date));
+}
+function personDay(iso){
+  const d=dayMap()[iso];
+  if(!d)return{state:'none'};
+  const sites=d.assignments.filter(a=>a.people.includes(curPerson)).map(a=>a.site);
+  if(sites.length)return{state:'site',sites};
+  // no site that day
+  if(isResident(curPerson))return{state:'factory'};
+  return{state:'rest'};
+}
+function renderPerson(){
+  if(!curPerson){main.innerHTML='<p style="color:#6b7280">上の人員から1名選んでください。</p>';return}
+  const weeks=weeksOfMonth();
+  let nSite=0,nFac=0,nRest=0;
+  const T=todayIso();
+  let html=`<div class="week"><div class="week-h">${esc(curPerson)} さんの予定（${TYPES[ptype[curPerson]]||'未設定'}）</div><div class="grid">`;
+  html+=WD.map((w,i)=>`<div class="mh ${i===0?'sun':''} ${i===6?'sat':''}">${w}</div>`).join('');
+  weeks.forEach(w=>{
+    w.forEach(d=>{
+      const {d:dd}=ymd(d.date);const wd=jsWd(d.date);
+      const cls=['cellbox',wd===0?'sun':'',wd===6?'sat':'',d.date===T?'today':''].join(' ');
+      const r=d._out?{state:'out'}:personDay(d.date);
+      let body='';
+      if(r.state==='site'){body=r.sites.map(s=>`<div class="badge" style="background:${colorOf(s)}">${esc(s)}</div>`).join('');nSite++;}
+      else if(r.state==='factory'){body='<div class="badge factory">工場</div>';nFac++;}
+      else if(r.state==='rest'){body='<div class="badge rest">休</div>';nRest++;}
+      else if(r.state==='none')body='<span class="count">－</span>';
+      html+=`<div class="${cls}"><div class="dnum"><span>${dd}<span class="wd"> ${WD[wd]}</span></span></div>${body}</div>`;
+    });
+  });
+  html+='</div></div>';
+  html=`<div class="summary"><div>現場 <b>${nSite}</b>日</div><div style="color:var(--factory)">工場 <b>${nFac}</b>日</div><div style="color:var(--rest)">休 <b>${nRest}</b>日</div></div>`+html;
+  main.innerHTML=html;
+}
+function renderFactory(){
+  const weeks=weeksOfMonth();
+  if(!weeks.length){main.innerHTML='<p style="color:#6b7280">この月のデータはありません。</p>';return}
+  const residents=allPeople().filter(isResident);
+  const T=todayIso();
+  let html=`<div class="note">「工場出勤」＝社員・常駐外注のうち、その日に現場が無い人。スポット(会社)は現場が無い日は休工のため除外。</div>`;
+  html+='<div class="week"><div class="grid">';
+  html+=WD.map((w,i)=>`<div class="mh ${i===0?'sun':''} ${i===6?'sat':''}">${w}</div>`).join('');
+  weeks.forEach(w=>{
+    w.forEach(d=>{
+      const {d:dd}=ymd(d.date);const wd=jsWd(d.date);
+      const cls=['cellbox',wd===0?'sun':'',wd===6?'sat':'',d.date===T?'today':''].join(' ');
+      let body='';
+      if(!d._out){
+        const dm=dayMap()[d.date];
+        const onSite=new Set();
+        (dm?dm.assignments:[]).forEach(a=>a.people.forEach(p=>onSite.add(p)));
+        const fac=residents.filter(p=>!onSite.has(p));
+        if(dm&&dm.assignments.length||fac.length<residents.length){
+          body=`<div class="badge factory">工場 ${fac.length}名</div><div class="names">${fac.map(esc).join('・')||'－'}</div>`;
+        }else{
+          body=`<span class="count">－</span>`;
+        }
+      }
+      html+=`<div class="${cls}"><div class="dnum"><span>${dd}<span class="wd"> ${WD[wd]}</span></span></div>${body}</div>`;
+    });
+  });
+  html+='</div></div>';
+  main.innerHTML=html;
+}
+// ---------- context bar ----------
+function buildCtx(){
+  const ctx=document.getElementById('ctx');
+  if(view==='person'){
+    const ppl=allPeople();
+    ctx.innerHTML=ppl.map(p=>`<button class="ptag ${p===curPerson?'on':''} ${ptype[p]==='spot'?'spot':''}" data-p="${esc(p)}">${esc(p)}</button>`).join('');
+    ctx.querySelectorAll('.ptag').forEach(b=>b.onclick=()=>{curPerson=b.dataset.p;render()});
+  }else ctx.innerHTML='';
+}
+// ---------- edit modal ----------
+let editDate=null;
+function openEdit(date){
+  editDate=date;
+  const d=dayMap()[date]||{date,assignments:[]};
+  document.getElementById('ovTitle').textContent=`${date}（${WD[jsWd(date)]}）の予定`;
+  const body=document.getElementById('ovBody');
+  body.innerHTML=`<div class="note">現場名と人員（「、」区切り）を入力。空欄で保存すると削除されます。会社＋人数表記OK（例：センバ4）。</div>
+    <div id="arows"></div>
+    <button class="lnk" id="addRow">＋ 現場を追加</button>`;
+  const rows=body.querySelector('#arows');
+  function addRow(site='',people=''){
+    const div=document.createElement('div');div.className='arow';
+    div.innerHTML=`<label>現場名</label><input class="s" value="${esc(site)}">
+      <label>人員（、区切り）</label><input class="p" value="${esc(people)}">`;
+    rows.appendChild(div);
+  }
+  d.assignments.forEach(a=>addRow(a.site,a.people.join('、')));
+  addRow();addRow();
+  body.querySelector('#addRow').onclick=()=>addRow();
+  document.getElementById('ov').classList.add('on');
+}
+document.getElementById('ovSave').onclick=()=>{
+  const rows=[...document.querySelectorAll('#arows .arow')];
+  const asg=[];
+  rows.forEach(r=>{
+    const s=r.querySelector('.s').value.trim();
+    const p=r.querySelector('.p').value.trim();
+    if(s)asg.push({site:s,people:p?p.replace(/，/g,'、').split('、').map(x=>x.trim()).filter(Boolean):[]});
+  });
+  let d=data.days.find(x=>x.date===editDate);
+  if(!d){d={date:editDate,weekday:WD[jsWd(editDate)],assignments:[]};data.days.push(d);data.days.sort((a,b)=>a.date<b.date?-1:1)}
+  d.assignments=asg;
+  save();closeOv();render();
+};
+function closeOv(){document.getElementById('ov').classList.remove('on')}
+document.getElementById('ovCancel').onclick=closeOv;
+document.getElementById('ov').onclick=e=>{if(e.target.id==='ov')closeOv()};
+// ---------- settings ----------
+document.getElementById('gear').onclick=()=>{
+  const b=document.getElementById('ovsBody');
+  b.innerHTML=`<div class="note">種別で「現場が無い日」の扱いが変わります：<b>社員・常駐外注＝工場出勤</b>／<b>スポット＝休工</b>。数字付き(例: センバ4)は会社と推定し初期スポットにしています。</div>`+
+    allPeople().map(p=>`<div class="typesel"><span>${esc(p)}</span>
+      <select data-p="${esc(p)}">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}" ${ptype[p]===k?'selected':''}>${v}</option>`).join('')}</select></div>`).join('');
+  b.querySelectorAll('select').forEach(s=>s.onchange=()=>{ptype[s.dataset.p]=s.value;save();render()});
+  document.getElementById('ovs').classList.add('on');
+};
+document.getElementById('ovsClose').onclick=()=>document.getElementById('ovs').classList.remove('on');
+document.getElementById('ovs').onclick=e=>{if(e.target.id==='ovs')document.getElementById('ovs').classList.remove('on')};
+// ---------- nav / tabs ----------
+document.getElementById('prev').onclick=()=>{cursor=shiftMonth(cursor,-1);render()};
+document.getElementById('next').onclick=()=>{cursor=shiftMonth(cursor,1);render()};
+document.getElementById('today').onclick=()=>{const t=new Date().toISOString().slice(0,7);cursor=monthsList().includes(t)?t:monthsList()[0];render()};
+document.getElementById('reset').onclick=()=>{if(confirm('編集内容を破棄して、取込んだ元データに戻します。よろしいですか？')){data=JSON.parse(JSON.stringify(BASE_DATA));ptype=defaultTypes();save();render()}};
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');view=b.dataset.v;
+  if(view==='person'&&!curPerson)curPerson=allPeople()[0];
+  render();
+});
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+render();
+</script>
+</body>
+</html>
