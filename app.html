@@ -61,6 +61,16 @@
   .chip[draggable="true"]:active{cursor:grabbing}
   .lc.dragover{box-shadow:inset 0 0 0 2px #f59e0b !important;background:#fff7ed !important}
   .dndhint{font-size:11.5px;color:#0369a1;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:7px 10px;margin-bottom:10px}
+  .site{position:relative}
+  .cardx{position:absolute;top:1px;right:1px;width:16px;height:16px;line-height:15px;text-align:center;
+         background:rgba(0,0,0,.32);color:#fff;border-radius:50%;font-size:12px;font-weight:700;cursor:pointer}
+  .cardx:hover{background:#b91c1c}
+  .lc.rest{background:#fff7ed;border-top:2px solid #fed7aa}
+  .restbox{font-size:11px;color:#9a3412;font-weight:700}
+  .restbox b{font-size:13px}
+  .lc.fac .chip,.lc.rest .chip{background:#dbeafe;color:#1e3a8a;outline:none}
+  .lc.rest .chip{background:#fde4cf;color:#9a3412}
+  .lc.fac .chip.spot,.lc.rest .chip.spot{outline:1px dashed #94a3b8}
   .lc.fac{background:#f0fdff;border-top:2px solid #bae6fd}
   .lc.fac.off{background:#f8fafc}
   .facbox2{font-size:11px;color:#0369a1;font-weight:700}
@@ -164,6 +174,7 @@
   <div id="ctx" class="people-row"></div>
   <div class="spacer"></div>
   <span class="roletag" id="roletag"></span>
+  <button class="ghost" id="undo" style="display:none">↩ 元に戻す</button>
   <button class="ghost" id="gear" style="display:none">⚙ 人員設定</button>
   <button class="ghost" id="importBtn" style="display:none">⬆ 取込</button>
   <button class="ghost" id="memberBtn" style="display:none">👥 メンバー</button>
@@ -219,7 +230,8 @@ const firebaseConfig = {
 };
 // ==========================================================
 
-const TYPES={emp:"社員",res:"常駐外注",spot:"スポット(会社)"};
+const TYPES={A:"A 社員・常駐（現場＋工場）",B:"B 常駐（工場のみ・土日休）",C:"C 外注（現場のみ）"};
+const FAC='__FAC__', OFF='__OFF__';
 const WD=['日','月','火','水','木','金','土'];
 let app,auth,db, user=null, role=null;
 let data={days:[]}, ptype={}, editors=[], viewers=[];
@@ -301,10 +313,22 @@ function dayMap(){const m={};data.days.forEach(d=>m[d.date]=d);return m}
 function jsWd(iso){return new Date(iso+'T00:00:00').getDay()}
 function monthsList(){return [...new Set(data.days.map(d=>monthOf(d.date)))].sort()}
 function shiftMonth(ym,delta){let[y,m]=ym.split('-').map(Number);m+=delta;while(m<1){m+=12;y--}while(m>12){m-=12;y++}return y+'-'+String(m).padStart(2,'0')}
-function defType(p){return (/\d$/.test(p)||/センバ|応援|新興|α/.test(p))?'spot':'emp'}
+function defType(p){ if(/^センバ/.test(p))return 'A'; if(/^西若/.test(p))return 'C';
+  if(/\d$/.test(p)||/応援|新興|α/.test(p))return 'C'; return 'A'; }
 function tOf(p){return ptype[p]||defType(p)}
-function isResident(p){return tOf(p)==='emp'||tOf(p)==='res'}
-function allPeople(){const s=new Set();data.days.forEach(d=>d.assignments.forEach(a=>a.people.forEach(p=>s.add(p))));return [...s].sort((a,b)=>a.localeCompare(b,'ja'))}
+function isWeekdayDate(iso){const w=jsWd(iso);return w>=1&&w<=5}
+function isWorkingDay(iso){const d=dayMap()[iso];return !!(d&&d.assignments&&d.assignments.length)}
+function offOf(iso){const d=dayMap()[iso];return new Set(d&&d.off?d.off:[])}
+function onSiteSet(iso){const d=dayMap()[iso];const s=new Set();(d?d.assignments:[]).forEach(a=>a.people.forEach(p=>s.add(p)));return s}
+function allPeople(){const s=new Set();data.days.forEach(d=>d.assignments.forEach(a=>a.people.forEach(p=>s.add(p))));Object.keys(ptype).forEach(p=>s.add(p));return [...s].sort((a,b)=>a.localeCompare(b,'ja'))}
+// その日の自社工場出勤者：A=稼働日に現場が無い人／B=平日は常時／※休み・現場の人は除外
+function factoryList(iso){const on=onSiteSet(iso),off=offOf(iso),res=[];
+  allPeople().forEach(p=>{if(on.has(p)||off.has(p))return;const t=tOf(p);
+    if(t==='A'){if(isWorkingDay(iso))res.push(p);}else if(t==='B'){if(isWeekdayDate(iso))res.push(p);}});
+  return res;}
+function weekDates(iso){let s=new Date(iso+'T00:00:00');s.setDate(s.getDate()-jsWd(iso));const out=[];
+  const fmtD=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  for(let i=0;i<7;i++){out.push(fmtD(s));s.setDate(s.getDate()+1);}return out;}
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),1800)}
 const PALETTE=["#2563eb","#0891b2","#7c3aed","#db2777","#ea580c","#16a34a","#ca8a04","#dc2626","#0d9488","#4f46e5","#9333ea","#b45309","#475569"];
@@ -336,76 +360,101 @@ function render(){
   buildCtx();
   if(view==='site')renderSite();else if(view==='person')renderPerson();else renderFactory();
 }
+function chipHtml(p,date,loc,ed){return `<span class="chip ${tOf(p)==='C'?'spot':''}" ${ed?`draggable="true" data-person="${esc(p)}" data-date="${date}" data-loc="${esc(loc)}"`:''}>${esc(p)}</span>`;}
 function renderSite(){
   const weeks=weeksOfMonth();
   if(!weeks.length){main.innerHTML='<p style="color:#6b7280">この月のデータはありません。'+(role==='editor'?'「取込」から投入できます。':'')+'</p>';return}
-  const T=todayIso(),residents=allPeople().filter(isResident),ed=role==='editor';
+  const T=todayIso(),ed=role==='editor';
   let html='';
-  if(ed)html+='<div class="dndhint">編集者モード：マスを<b>クリック</b>で編集／人の名前を<b>ドラッグ</b>して別の現場へ移動（🏭自社工場へ落とすと現場から外れます・PC向け）</div>';
+  if(ed)html+='<div class="dndhint">編集者：マスを<b>クリック</b>で編集／名前を<b>ドラッグ</b>で移動（🏭工場＝現場から外す・🏖休み＝お休み・逆向きもOK・PC向け）／カードの<b>×</b>でその日の現場を削除</div>';
   weeks.forEach(w=>{
     const lanes=weekSites(w);
     html+='<div class="week scroll"><div class="wgrid">';
     w.forEach(d=>{const wd=jsWd(d.date);const{d:dd}=ymd(d.date);
       html+=`<div class="dhead ${wd===0?'sun':''} ${wd===6?'sat':''} ${d.date===T?'today':''}">${dd}<span class="wd"> ${WD[wd]}</span></div>`;});
+    // 現場レーン
     lanes.forEach(site=>{const c=colorOf(site);
       w.forEach(d=>{const a=d.assignments.find(x=>x.site===site);const t=d.date===T?'today':'';
-        const sattr=`data-date="${d.date}" data-site="${esc(site)}"`;
-        if(a){const chips=a.people.map(p=>`<span class="chip ${tOf(p)==='spot'?'spot':''}" ${ed?`draggable="true" data-person="${esc(p)}" data-date="${d.date}" data-site="${esc(site)}"`:''}>${esc(p)}</span>`).join('');
-          html+=`<div class="lc ${ed?'drop':'ro'} ${t}" ${sattr}><div class="site" style="background:${c}"><span class="nm">${esc(site)}</span>${chips}</div></div>`;}
+        const sattr=`data-date="${d.date}" data-loc="${esc(site)}"`;
+        if(a){const chips=a.people.map(p=>chipHtml(p,d.date,site,ed)).join('');
+          html+=`<div class="lc ${ed?'drop':'ro'} ${t}" ${sattr}><div class="site" style="background:${c}">${ed?`<span class="cardx" data-date="${d.date}" data-site="${esc(site)}" title="この日の現場を削除">×</span>`:''}<span class="nm">${esc(site)}</span>${chips}</div></div>`;}
         else html+=`<div class="lc off ${ed?'drop':'ro'} ${t}" ${sattr}></div>`;});
     });
-    w.forEach(d=>{const t=d.date===T?'today':'';
-      if(!d._out&&d.assignments.length){const onSite=new Set();d.assignments.forEach(a=>a.people.forEach(p=>onSite.add(p)));
-        const fac=residents.filter(p=>!onSite.has(p));
-        html+=`<div class="lc fac ${ed?'dropfac':'ro'} ${t}" data-facdate="${d.date}"><div class="facbox2">🏭 自社工場 <b>${fac.length}</b>名<div class="facn">${fac.map(esc).join('・')||'－'}</div></div></div>`;}
-      else html+=`<div class="lc fac off ${ed?'dropfac':'ro'} ${t}" data-facdate="${d.date}"><span class="count">－</span></div>`;});
+    // 自社工場レーン
+    w.forEach(d=>{const t=d.date===T?'today':'';const fac=d._out?[]:factoryList(d.date);
+      const chips=fac.map(p=>chipHtml(p,d.date,FAC,ed)).join('');
+      html+=`<div class="lc fac ${ed?'drop':'ro'} ${t}" data-date="${d.date}" data-loc="${FAC}"><div class="facbox2">🏭 自社工場 <b>${fac.length}</b>名</div><div class="facn">${chips||'<span class="count">－</span>'}</div></div>`;});
+    // 休みレーン
+    w.forEach(d=>{const t=d.date===T?'today':'';const off=d._out?[]:[...offOf(d.date)];
+      const chips=off.map(p=>chipHtml(p,d.date,OFF,ed)).join('');
+      html+=`<div class="lc rest ${ed?'drop':'ro'} ${t}" data-date="${d.date}" data-loc="${OFF}"><div class="restbox">🏖 休み <b>${off.length}</b></div><div class="facn">${chips||'<span class="count">－</span>'}</div></div>`;});
     html+='</div></div>';
   });
   main.innerHTML=html;
-  if(ed){main.querySelectorAll('.lc[data-date]').forEach(el=>el.onclick=()=>openEdit(el.dataset.date));wireDnD();}
+  if(ed){
+    main.querySelectorAll('.lc[data-loc]').forEach(el=>el.onclick=(e)=>{if(e.target.classList.contains('chip')||e.target.classList.contains('cardx'))return;const l=el.dataset.loc;if(l!==FAC&&l!==OFF)openEdit(el.dataset.date);});
+    main.querySelectorAll('.cardx').forEach(x=>x.onclick=(e)=>{e.stopPropagation();deleteCard(x.dataset.date,x.dataset.site);});
+    wireDnD();
+  }
 }
-// ---------- ドラッグ＆ドロップ（人員の移動） ----------
+// ---------- ドラッグ＆ドロップ（人員の移動・loc＝現場名/__FAC__/__OFF__）----------
 let dragSrc=null;
 function wireDnD(){
   main.querySelectorAll('.chip[draggable="true"]').forEach(ch=>{
-    ch.addEventListener('dragstart',e=>{e.stopPropagation();dragSrc={person:ch.dataset.person,date:ch.dataset.date,site:ch.dataset.site};
+    ch.addEventListener('dragstart',e=>{e.stopPropagation();dragSrc={person:ch.dataset.person,date:ch.dataset.date,loc:ch.dataset.loc};
       e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain',ch.dataset.person)}catch(_){}});
     ch.addEventListener('dragend',()=>{dragSrc=null;main.querySelectorAll('.lc.dragover').forEach(x=>x.classList.remove('dragover'));});
   });
-  main.querySelectorAll('.lc.drop[data-site], .lc.dropfac[data-facdate]').forEach(cell=>{
+  main.querySelectorAll('.lc.drop[data-loc]').forEach(cell=>{
     cell.addEventListener('dragover',e=>{if(!dragSrc)return;e.preventDefault();e.dataTransfer.dropEffect='move';cell.classList.add('dragover');});
     cell.addEventListener('dragleave',()=>cell.classList.remove('dragover'));
     cell.addEventListener('drop',e=>{e.preventDefault();cell.classList.remove('dragover');if(!dragSrc)return;
-      const src=dragSrc;dragSrc=null;
-      if(cell.classList.contains('dropfac'))movePerson(src,{date:cell.dataset.facdate,site:null});
-      else movePerson(src,{date:cell.dataset.date,site:cell.dataset.site});});
+      const src=dragSrc;dragSrc=null;movePerson(src,{date:cell.dataset.date,loc:cell.dataset.loc});});
   });
 }
+function locRemove(s,person,loc){if(loc===FAC)return;if(loc===OFF){s.off=s.off.filter(p=>p!==person);return;}
+  const a=s.assignments.find(x=>x.site===loc);if(a)a.people=a.people.filter(p=>p!==person);}
+function locAdd(s,person,loc){if(loc===FAC)return;if(loc===OFF){if(!s.off.includes(person))s.off.push(person);return;}
+  let a=s.assignments.find(x=>x.site===loc);if(!a){a={site:loc,people:[]};s.assignments.push(a);}if(!a.people.includes(person))a.people.push(person);}
 async function movePerson(src,tgt){
-  if(!src)return;
-  if(tgt.site && src.date===tgt.date && src.site===tgt.site)return; // 同じ場所
-  const dm=dayMap(),affected={};
-  const getAsg=date=>{if(!(date in affected)){const d=dm[date];affected[date]=d?JSON.parse(JSON.stringify(d.assignments)):[];}return affected[date];};
-  // 移動元から外す
-  const sa=getAsg(src.date);const ss=sa.find(a=>a.site===src.site);
-  if(ss)ss.people=ss.people.filter(p=>p!==src.person);
-  // 移動先へ追加（工場ドロップ時は追加しない＝外すだけ）
-  if(tgt.site){const ta=getAsg(tgt.date);let ts=ta.find(a=>a.site===tgt.site);
-    if(!ts){ts={site:tgt.site,people:[]};ta.push(ts);}
-    if(!ts.people.includes(src.person))ts.people.push(src.person);}
-  try{
-    for(const date of Object.keys(affected)){
-      const asg=affected[date].filter(a=>a.people.length>0); // 人員0の現場は消す
-      if(asg.length)await setDoc(doc(db,'days',date),{date,weekday:WD[jsWd(date)],assignments:asg});
-      else await deleteDoc(doc(db,'days',date));
-    }
-    toast(tgt.site?`${src.person} を移動しました`:`${src.person} を現場から外しました`);
-  }catch(e){alert('移動に失敗：'+e.message);}
+  if(!src)return; if(src.date===tgt.date&&src.loc===tgt.loc)return;
+  const dm=dayMap(),state={};
+  const st=date=>{if(!(date in state)){const d=dm[date];state[date]={assignments:d?JSON.parse(JSON.stringify(d.assignments)):[],off:d&&d.off?[...d.off]:[]};}return state[date];};
+  locRemove(st(src.date),src.person,src.loc);
+  locAdd(st(tgt.date),src.person,tgt.loc);
+  const changes={};for(const date in state)changes[date]=state[date];
+  await applyDayChanges(changes, tgt.loc===FAC?`${src.person} を工場へ`:tgt.loc===OFF?`${src.person} をお休みへ`:`${src.person} を移動`);
 }
-function personDay(iso){const d=dayMap()[iso];if(!d)return{state:'none'};
-  const sites=d.assignments.filter(a=>a.people.includes(curPerson)).map(a=>a.site);
-  if(sites.length)return{state:'site',sites};
-  if(isResident(curPerson))return{state:'factory'};return{state:'rest'};}
+// ---------- 変更の適用＆元に戻す ----------
+let undoStack=[];
+async function writeDay(date,val){
+  const asg=(val&&val.assignments)?val.assignments.filter(a=>a.people.length>0):[];
+  const off=(val&&val.off)?val.off:[];
+  if(asg.length||off.length){const o={date,weekday:WD[jsWd(date)],assignments:asg};if(off.length)o.off=off;await setDoc(doc(db,'days',date),o);}
+  else await deleteDoc(doc(db,'days',date));
+}
+async function applyDayChanges(changes,label){
+  const dm=dayMap(),before=[];
+  for(const date in changes){const d=dm[date];before.push({date,assignments:d?JSON.parse(JSON.stringify(d.assignments)):null,off:d&&d.off?[...d.off]:null});}
+  try{for(const date in changes)await writeDay(date,changes[date]);undoStack.push(before);updateUndoBtn();if(label)toast(label);}
+  catch(e){alert('保存に失敗：'+e.message);}
+}
+async function doUndo(){const before=undoStack.pop();if(!before)return;
+  try{for(const b of before)await writeDay(b.date,{assignments:b.assignments||[],off:b.off||[]});updateUndoBtn();toast('元に戻しました');}
+  catch(e){alert('戻すのに失敗：'+e.message);}}
+function updateUndoBtn(){const b=document.getElementById('undo');if(b)b.style.display=(role==='editor'&&undoStack.length)?'':'none';}
+async function deleteCard(date,site){const d=dayMap()[date];if(!d)return;
+  await applyDayChanges({[date]:{assignments:d.assignments.filter(a=>a.site!==site),off:d.off||[]}},`${site}（${date}）を削除`);}
+async function deleteSiteWeek(site,iso){const dm=dayMap(),changes={};
+  weekDates(iso).forEach(date=>{const d=dm[date];if(d&&d.assignments.some(a=>a.site===site))changes[date]={assignments:d.assignments.filter(a=>a.site!==site),off:d.off||[]};});
+  if(Object.keys(changes).length)await applyDayChanges(changes,`${site} を今週分まとめて削除`);}
+function personDay(iso){const d=dayMap()[iso];
+  if(d){const sites=d.assignments.filter(a=>a.people.includes(curPerson)).map(a=>a.site);if(sites.length)return{state:'site',sites};
+    if((d.off||[]).includes(curPerson))return{state:'rest'};}
+  const t=tOf(curPerson);
+  if(t==='A')return isWorkingDay(iso)?{state:'factory'}:{state:'none'};
+  if(t==='B')return isWeekdayDate(iso)?{state:'factory'}:{state:'rest'};
+  return{state:'rest'};}
 function renderPerson(){
   if(!curPerson){main.innerHTML='<p style="color:#6b7280">上の人員から1名選んでください。</p>';return}
   const weeks=weeksOfMonth(),T=todayIso();let nSite=0,nFac=0,nRest=0;
@@ -426,22 +475,20 @@ function renderPerson(){
 function renderFactory(){
   const weeks=weeksOfMonth(),T=todayIso();
   if(!weeks.length){main.innerHTML='<p style="color:#6b7280">この月のデータはありません。</p>';return}
-  const residents=allPeople().filter(isResident);
-  let html=`<div class="note">「工場出勤」＝社員・常駐外注のうち、その日に現場が無い人。スポット(会社)は現場が無い日は休工のため除外。</div>`;
+  let html=`<div class="note">「工場出勤」＝A(社員・常駐)で現場が無い日＋B(工場のみ・常駐)の平日。現場の人・お休みの人・C(外注)は除外。</div>`;
   html+='<div class="week"><div class="grid">';
   html+=WD.map((x,i)=>`<div class="mh ${i===0?'sun':''} ${i===6?'sat':''}">${x}</div>`).join('');
   weeks.forEach(w=>w.forEach(d=>{const{d:dd}=ymd(d.date);const wd=jsWd(d.date);
     const cls=['cellbox',wd===0?'sun':'',wd===6?'sat':'',d.date===T?'today':''].join(' ');let body='';
-    if(!d._out){const dm=dayMap()[d.date];const onSite=new Set();(dm?dm.assignments:[]).forEach(a=>a.people.forEach(p=>onSite.add(p)));
-      const fac=residents.filter(p=>!onSite.has(p));
-      if(dm&&dm.assignments.length)body=`<div class="badge factory">工場 ${fac.length}名</div><div class="names">${fac.map(esc).join('・')||'－'}</div>`;
+    if(!d._out){const fac=factoryList(d.date);
+      if(fac.length)body=`<div class="badge factory">工場 ${fac.length}名</div><div class="names">${fac.map(esc).join('・')}</div>`;
       else body=`<span class="count">－</span>`;}
     html+=`<div class="${cls}"><div class="dnum"><span>${dd}<span class="wd"> ${WD[wd]}</span></span></div>${body}</div>`;}));
   html+='</div></div>';main.innerHTML=html;
 }
 function buildCtx(){const ctx=document.getElementById('ctx');
   if(view==='person'){const ppl=allPeople();if(!curPerson&&ppl.length)curPerson=ppl[0];
-    ctx.innerHTML=ppl.map(p=>`<button class="ptag ${p===curPerson?'on':''} ${tOf(p)==='spot'?'spot':''}" data-p="${esc(p)}">${esc(p)}</button>`).join('');
+    ctx.innerHTML=ppl.map(p=>`<button class="ptag ${p===curPerson?'on':''} ${tOf(p)==='C'?'spot':''}" data-p="${esc(p)}">${esc(p)}</button>`).join('');
     ctx.querySelectorAll('.ptag').forEach(b=>b.onclick=()=>{curPerson=b.dataset.p;render()});
   }else ctx.innerHTML='';}
 
@@ -449,14 +496,18 @@ function buildCtx(){const ctx=document.getElementById('ctx');
 let editDate=null;
 function openEdit(date){
   if(role!=='editor')return;
-  editDate=date;const d=dayMap()[date]||{date,assignments:[]};
+  editDate=date;const d=dayMap()[date]||{date,assignments:[],off:[]};
   document.getElementById('ovTitle').textContent=`${date}（${WD[jsWd(date)]}）の予定`;
   const body=document.getElementById('ovBody');
-  body.innerHTML=`<div class="note">現場名と人員（「、」区切り）を入力。空欄で保存すると削除。会社＋人数表記OK（例：センバ4）。</div><div id="arows"></div><button class="lnk" id="addRow">＋ 現場を追加</button>`;
+  body.innerHTML=`<div class="note">現場名と人員（「、」区切り）を入力。空欄で保存すると削除。会社＋人数表記OK（例：センバ4）。</div><div id="arows"></div><button class="lnk" id="addRow">＋ 現場を追加</button>
+    <div class="arow" style="margin-top:12px;border-color:#fdba74"><label>🏖 お休み（、区切り）— この日休む人</label><input id="offIn" value="${esc((d.off||[]).join('、'))}"></div>`;
   const rows=body.querySelector('#arows');
-  function addRow(site='',people=''){const div=document.createElement('div');div.className='arow';
-    div.innerHTML=`<label>現場名</label><input class="s" value="${esc(site)}"><label>人員（、区切り）</label><input class="p" value="${esc(people)}">`;rows.appendChild(div);}
-  d.assignments.forEach(a=>addRow(a.site,a.people.join('、')));addRow();addRow();
+  function addRow(site='',people='',existing=false){const div=document.createElement('div');div.className='arow';
+    div.innerHTML=`<label>現場名</label><input class="s" value="${esc(site)}"><label>人員（、区切り）</label><input class="p" value="${esc(people)}">`+
+      (existing&&site?`<button class="lnk" data-week="1" style="margin-top:6px;color:#b91c1c">🗑 この現場を今週分まとめて削除</button>`:'');
+    rows.appendChild(div);
+    const wb=div.querySelector('[data-week]');if(wb)wb.onclick=()=>{if(confirm(`「${site}」を、この週（日〜土）の全日からまとめて削除します。よろしいですか？`)){deleteSiteWeek(site,editDate);closeOv();}};}
+  d.assignments.forEach(a=>addRow(a.site,a.people.join('、'),true));addRow();addRow();
   body.querySelector('#addRow').onclick=()=>addRow();
   document.getElementById('ov').classList.add('on');
 }
@@ -464,11 +515,10 @@ document.getElementById('ovSave').onclick=async()=>{
   const rows=[...document.querySelectorAll('#arows .arow')];const asg=[];
   rows.forEach(r=>{const s=r.querySelector('.s').value.trim();const p=r.querySelector('.p').value.trim();
     if(s)asg.push({site:s,people:p?p.replace(/，/g,'、').split('、').map(x=>x.trim()).filter(Boolean):[]});});
-  try{
-    if(asg.length) await setDoc(doc(db,'days',editDate),{date:editDate,weekday:WD[jsWd(editDate)],assignments:asg});
-    else await deleteDoc(doc(db,'days',editDate));
-    closeOv();toast('保存しました');
-  }catch(e){alert('保存に失敗しました：'+e.message);}
+  const offv=(document.getElementById('offIn').value||'').trim();
+  const off=offv?offv.replace(/，/g,'、').split('、').map(x=>x.trim()).filter(Boolean):[];
+  closeOv();
+  await applyDayChanges({[editDate]:{assignments:asg,off}},'保存しました');
 };
 function closeOv(){document.getElementById('ov').classList.remove('on')}
 document.getElementById('ovCancel').onclick=closeOv;
@@ -477,12 +527,18 @@ document.getElementById('ov').onclick=e=>{if(e.target.id==='ov')closeOv()};
 // ---------- 人員設定 ----------
 document.getElementById('gear').onclick=()=>{
   const b=document.getElementById('ovsBody');
-  b.innerHTML=`<div class="note">現場が無い日：<b>社員・常駐外注＝工場出勤</b>／<b>スポット＝休工</b>。数字付き(例:センバ4)は会社と推定し初期スポット。</div>`+
-    allPeople().map(p=>`<div class="typesel"><span>${esc(p)}</span><select data-p="${esc(p)}">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}" ${tOf(p)===k?'selected':''}>${v}</option>`).join('')}</select></div>`).join('');
-  b.querySelectorAll('select').forEach(s=>s.onchange=async()=>{
-    const np={...ptype};np[s.dataset.p]=s.value;
-    try{await setDoc(doc(db,'config','app'),{ptype:np},{merge:true});toast('種別を保存');}catch(e){alert('保存失敗：'+e.message);}
-  });
+  function draw(){
+    b.innerHTML=`<div class="note">A＝社員・常駐（現場＋工場／現場が無い日は工場）。B＝常駐（工場のみ・土日休）。C＝外注（現場のみ／現場が無い日は休）。未登録は名前から推定します。</div>
+      <div style="display:flex;gap:6px;margin-bottom:12px"><input id="newp" placeholder="人員を追加（例：奥井(幸)）" style="flex:1;border:1px solid var(--line);border-radius:8px;padding:7px">
+      <select id="newt">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}">${k}</option>`).join('')}</select><button class="btn gray" id="addp">追加</button></div>`+
+      allPeople().map(p=>`<div class="typesel"><span>${esc(p)}</span><select data-p="${esc(p)}">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}" ${tOf(p)===k?'selected':''}>${v}</option>`).join('')}</select></div>`).join('');
+    b.querySelectorAll('select[data-p]').forEach(s=>s.onchange=async()=>{const np={...ptype};np[s.dataset.p]=s.value;ptype=np;
+      try{await setDoc(doc(db,'config','app'),{ptype:np},{merge:true});toast('種別を保存');}catch(e){alert('保存失敗：'+e.message);}});
+    b.querySelector('#addp').onclick=async()=>{const name=b.querySelector('#newp').value.trim();if(!name)return;
+      const np={...ptype};np[name]=b.querySelector('#newt').value;ptype=np;
+      try{await setDoc(doc(db,'config','app'),{ptype:np},{merge:true});toast('追加しました');draw();}catch(e){alert('保存失敗：'+e.message);}};
+  }
+  draw();
   document.getElementById('ovs').classList.add('on');
 };
 document.getElementById('ovsClose').onclick=()=>document.getElementById('ovs').classList.remove('on');
@@ -508,7 +564,7 @@ document.getElementById('ovm').onclick=e=>{if(e.target.id==='ovm')document.getEl
 // ---------- 取込（JSON） ----------
 document.getElementById('importBtn').onclick=()=>{
   const b=document.getElementById('oviBody');
-  b.innerHTML=`<div class="note">_parse.py が作る <b>schedule.json</b> を選ぶと、日ごとにFirestoreへ反映します（同じ日は上書き）。実データは端末からFirestoreへ直接送られ、公開コードには残りません。</div>
+  b.innerHTML=`<div class="note">JSONファイルを選ぶとFirestoreへ反映します（同じ日は上書き）。実データは端末から直接送られ、公開コードには残りません。<br>・<b>schedule.json</b>（予定）…日ごとに反映<br>・<b>roster.json</b>（人員構成 ptype）…人の種別A/B/Cを反映</div>
     <button class="btn primary" id="pick">ファイルを選択</button><div id="impProg" style="margin-top:10px;font-size:13px"></div>`;
   b.querySelector('#pick').onclick=()=>document.getElementById('fileInput').click();
   document.getElementById('ovi').classList.add('on');
@@ -516,12 +572,20 @@ document.getElementById('importBtn').onclick=()=>{
 document.getElementById('fileInput').onchange=async(e)=>{
   const f=e.target.files[0];if(!f)return;const prog=document.getElementById('impProg');
   try{
-    const json=JSON.parse(await f.text());const days=json.days||json;
-    if(!Array.isArray(days))throw new Error('days配列が見つかりません');
-    let n=0;for(const d of days){if(!d.date)continue;
-      await setDoc(doc(db,'days',d.date),{date:d.date,weekday:d.weekday||WD[jsWd(d.date)],assignments:d.assignments||[]});
-      n++;prog.textContent=`取込中… ${n}/${days.length}`;}
-    prog.textContent=`完了：${n}件を反映しました。`;toast('取込完了');
+    const json=JSON.parse(await f.text());
+    if(json.ptype&&typeof json.ptype==='object'){
+      const np={...ptype,...json.ptype};ptype=np;
+      await setDoc(doc(db,'config','app'),{ptype:np},{merge:true});
+      prog.textContent=`人員構成：${Object.keys(json.ptype).length}名の種別を反映しました。`;toast('人員構成を取込');
+    }
+    const days=json.days||(Array.isArray(json)?json:null);
+    if(Array.isArray(days)){
+      let n=0;for(const d of days){if(!d.date)continue;
+        const o={date:d.date,weekday:d.weekday||WD[jsWd(d.date)],assignments:d.assignments||[]};if(d.off&&d.off.length)o.off=d.off;
+        await setDoc(doc(db,'days',d.date),o);
+        n++;prog.textContent=`取込中… ${n}/${days.length}`;}
+      prog.textContent=`完了：予定${n}件を反映しました。`;toast('取込完了');
+    }else if(!json.ptype)throw new Error('days配列もptypeも見つかりません');
   }catch(err){prog.textContent='失敗：'+err.message;}
   e.target.value='';
 };
@@ -532,6 +596,7 @@ document.getElementById('ovi').onclick=e=>{if(e.target.id==='ovi')document.getEl
 document.getElementById('prev').onclick=()=>{cursor=shiftMonth(cursor,-1);render()};
 document.getElementById('next').onclick=()=>{cursor=shiftMonth(cursor,1);render()};
 document.getElementById('today').onclick=()=>{const t=todayIso().slice(0,7);const m=monthsList();cursor=m.includes(t)?t:(m[0]||t);render()};
+document.getElementById('undo').onclick=doUndo;
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));b.classList.add('on');view=b.dataset.v;
   if(view==='person'&&!curPerson)curPerson=allPeople()[0];render();});
