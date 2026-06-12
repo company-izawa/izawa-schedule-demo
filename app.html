@@ -321,9 +321,15 @@ function isWorkingDay(iso){const d=dayMap()[iso];return !!(d&&d.assignments&&d.a
 function offOf(iso){const d=dayMap()[iso];return new Set(d&&d.off?d.off:[])}
 function onSiteSet(iso){const d=dayMap()[iso];const s=new Set();(d?d.assignments:[]).forEach(a=>a.people.forEach(p=>s.add(p)));return s}
 function allPeople(){const s=new Set();data.days.forEach(d=>d.assignments.forEach(a=>a.people.forEach(p=>s.add(p))));Object.keys(ptype).forEach(p=>s.add(p));return [...s].sort((a,b)=>a.localeCompare(b,'ja'))}
-// その日の自社工場出勤者：A=稼働日に現場が無い人／B=平日は常時／※休み・現場の人は除外
-function factoryList(iso){const on=onSiteSet(iso),off=offOf(iso),res=[];
-  allPeople().forEach(p=>{if(on.has(p)||off.has(p))return;const t=tOf(p);
+// 会社グループ（センバ/西若/応援など。人数つきの外部チーム）判定
+function baseOf(p){const m=p.match(/^(.+?)(\d+)$/);return m?m[1]:p;}
+function isGroup(p){return /\d$/.test(p)||/^(センバ|西若|応援|新興)/.test(p)||p==='+α';}
+function dispName(p){return isGroup(p)?baseOf(p):p;}
+// 人物一覧（会社グループは人数違いをまとめて1つに）
+function peopleDisplay(){const s=new Set();allPeople().forEach(p=>s.add(dispName(p)));return [...s].sort((a,b)=>a.localeCompare(b,'ja'))}
+// その日の自社工場出勤者：A=稼働日に現場が無い人／B=平日／日曜は休み・会社グループ・現場・お休みは除外
+function factoryList(iso){if(jsWd(iso)===0)return [];const on=onSiteSet(iso),off=offOf(iso),res=[];
+  allPeople().forEach(p=>{if(isGroup(p)||on.has(p)||off.has(p))return;const t=tOf(p);
     if(t==='A'){if(isWorkingDay(iso))res.push(p);}else if(t==='B'){if(isWeekdayDate(iso))res.push(p);}});
   return res;}
 function weekDates(iso){let s=new Date(iso+'T00:00:00');s.setDate(s.getDate()-jsWd(iso));const out=[];
@@ -366,7 +372,7 @@ function renderSite(){
   if(!weeks.length){main.innerHTML='<p style="color:#6b7280">この月のデータはありません。'+(role==='editor'?'「取込」から投入できます。':'')+'</p>';return}
   const T=todayIso(),ed=role==='editor';
   let html='';
-  if(ed)html+='<div class="dndhint">編集者：マスを<b>クリック</b>で編集／名前を<b>ドラッグ</b>で移動（🏭工場＝現場から外す・🏖休み＝お休み・逆向きもOK・PC向け）／カードの<b>×</b>でその日の現場を削除</div>';
+  if(ed)html+='<div class="dndhint">編集者：マスを<b>クリック</b>で編集／名前を<b>ドラッグ</b>で移動（🏭工場・🏖休みへも、逆向きもOK）／<b>Ctrlを押しながらドラッグ＝コピー</b>（元の日にも残す）／カードの<b>×</b>でその日の現場を削除・PC向け</div>';
   weeks.forEach(w=>{
     const lanes=weekSites(w);
     html+='<div class="week scroll"><div class="wgrid">';
@@ -392,7 +398,7 @@ function renderSite(){
   });
   main.innerHTML=html;
   if(ed){
-    main.querySelectorAll('.lc[data-loc]').forEach(el=>el.onclick=(e)=>{if(e.target.classList.contains('chip')||e.target.classList.contains('cardx'))return;const l=el.dataset.loc;if(l!==FAC&&l!==OFF)openEdit(el.dataset.date);});
+    main.querySelectorAll('.lc[data-loc]').forEach(el=>el.onclick=(e)=>{if(e.target.classList.contains('chip')||e.target.classList.contains('cardx'))return;openEdit(el.dataset.date);});
     main.querySelectorAll('.cardx').forEach(x=>x.onclick=(e)=>{e.stopPropagation();deleteCard(x.dataset.date,x.dataset.site);});
     wireDnD();
   }
@@ -406,24 +412,25 @@ function wireDnD(){
     ch.addEventListener('dragend',()=>{dragSrc=null;main.querySelectorAll('.lc.dragover').forEach(x=>x.classList.remove('dragover'));});
   });
   main.querySelectorAll('.lc.drop[data-loc]').forEach(cell=>{
-    cell.addEventListener('dragover',e=>{if(!dragSrc)return;e.preventDefault();e.dataTransfer.dropEffect='move';cell.classList.add('dragover');});
+    cell.addEventListener('dragover',e=>{if(!dragSrc)return;e.preventDefault();e.dataTransfer.dropEffect=(e.ctrlKey||e.metaKey)?'copy':'move';cell.classList.add('dragover');});
     cell.addEventListener('dragleave',()=>cell.classList.remove('dragover'));
     cell.addEventListener('drop',e=>{e.preventDefault();cell.classList.remove('dragover');if(!dragSrc)return;
-      const src=dragSrc;dragSrc=null;movePerson(src,{date:cell.dataset.date,loc:cell.dataset.loc});});
+      const src=dragSrc;dragSrc=null;movePerson(src,{date:cell.dataset.date,loc:cell.dataset.loc},e.ctrlKey||e.metaKey);});
   });
 }
 function locRemove(s,person,loc){if(loc===FAC)return;if(loc===OFF){s.off=s.off.filter(p=>p!==person);return;}
   const a=s.assignments.find(x=>x.site===loc);if(a)a.people=a.people.filter(p=>p!==person);}
 function locAdd(s,person,loc){if(loc===FAC)return;if(loc===OFF){if(!s.off.includes(person))s.off.push(person);return;}
   let a=s.assignments.find(x=>x.site===loc);if(!a){a={site:loc,people:[]};s.assignments.push(a);}if(!a.people.includes(person))a.people.push(person);}
-async function movePerson(src,tgt){
+async function movePerson(src,tgt,copy){
   if(!src)return; if(src.date===tgt.date&&src.loc===tgt.loc)return;
+  const isSite=tgt.loc!==FAC&&tgt.loc!==OFF, doCopy=!!copy&&isSite;
   const dm=dayMap(),state={};
   const st=date=>{if(!(date in state)){const d=dm[date];state[date]={assignments:d?JSON.parse(JSON.stringify(d.assignments)):[],off:d&&d.off?[...d.off]:[]};}return state[date];};
-  locRemove(st(src.date),src.person,src.loc);
+  if(!doCopy)locRemove(st(src.date),src.person,src.loc);
   locAdd(st(tgt.date),src.person,tgt.loc);
   const changes={};for(const date in state)changes[date]=state[date];
-  await applyDayChanges(changes, tgt.loc===FAC?`${src.person} を工場へ`:tgt.loc===OFF?`${src.person} をお休みへ`:`${src.person} を移動`);
+  await applyDayChanges(changes, doCopy?`${src.person} をコピー`:tgt.loc===FAC?`${src.person} を工場へ`:tgt.loc===OFF?`${src.person} をお休みへ`:`${src.person} を移動`);
 }
 // ---------- 変更の適用＆元に戻す ----------
 let undoStack=[];
@@ -448,17 +455,19 @@ async function deleteCard(date,site){const d=dayMap()[date];if(!d)return;
 async function deleteSiteWeek(site,iso){const dm=dayMap(),changes={};
   weekDates(iso).forEach(date=>{const d=dm[date];if(d&&d.assignments.some(a=>a.site===site))changes[date]={assignments:d.assignments.filter(a=>a.site!==site),off:d.off||[]};});
   if(Object.keys(changes).length)await applyDayChanges(changes,`${site} を今週分まとめて削除`);}
-function personDay(iso){const d=dayMap()[iso];
-  if(d){const sites=d.assignments.filter(a=>a.people.includes(curPerson)).map(a=>a.site);if(sites.length)return{state:'site',sites};
-    if((d.off||[]).includes(curPerson))return{state:'rest'};}
-  const t=tOf(curPerson);
-  if(t==='A')return isWorkingDay(iso)?{state:'factory'}:{state:'none'};
+function personDay(iso){const d=dayMap()[iso],sel=curPerson;
+  if(d){const sites=d.assignments.filter(a=>a.people.some(p=>dispName(p)===sel)).map(a=>a.site);if(sites.length)return{state:'site',sites};
+    if((d.off||[]).some(p=>dispName(p)===sel))return{state:'rest'};}
+  if(isGroup(sel))return{state:'none'};
+  const t=tOf(sel);
+  if(t==='A')return (jsWd(iso)!==0&&isWorkingDay(iso))?{state:'factory'}:{state:'none'};
   if(t==='B')return isWeekdayDate(iso)?{state:'factory'}:{state:'rest'};
   return{state:'rest'};}
 function renderPerson(){
   if(!curPerson){main.innerHTML='<p style="color:#6b7280">上の人員から1名選んでください。</p>';return}
   const weeks=weeksOfMonth(),T=todayIso();let nSite=0,nFac=0,nRest=0;
-  let html=`<div class="week"><div class="week-h">${esc(curPerson)} さんの予定（${TYPES[tOf(curPerson)]}）</div><div class="grid">`;
+  const plabel=isGroup(curPerson)?'会社・応援（現場のみ）':TYPES[tOf(curPerson)];
+  let html=`<div class="week"><div class="week-h">${esc(curPerson)} さんの予定（${plabel}）</div><div class="grid">`;
   html+=WD.map((x,i)=>`<div class="mh ${i===0?'sun':''} ${i===6?'sat':''}">${x}</div>`).join('');
   weeks.forEach(w=>w.forEach(d=>{const{d:dd}=ymd(d.date);const wd=jsWd(d.date);
     const cls=['cellbox',wd===0?'sun':'',wd===6?'sat':'',d.date===T?'today':''].join(' ');
@@ -487,8 +496,8 @@ function renderFactory(){
   html+='</div></div>';main.innerHTML=html;
 }
 function buildCtx(){const ctx=document.getElementById('ctx');
-  if(view==='person'){const ppl=allPeople();if(!curPerson&&ppl.length)curPerson=ppl[0];
-    ctx.innerHTML=ppl.map(p=>`<button class="ptag ${p===curPerson?'on':''} ${tOf(p)==='C'?'spot':''}" data-p="${esc(p)}">${esc(p)}</button>`).join('');
+  if(view==='person'){const ppl=peopleDisplay();if((!curPerson||!ppl.includes(curPerson))&&ppl.length)curPerson=ppl[0];
+    ctx.innerHTML=ppl.map(p=>`<button class="ptag ${p===curPerson?'on':''} ${(!isGroup(p)&&tOf(p)==='C')?'spot':''}" data-p="${esc(p)}">${esc(p)}</button>`).join('');
     ctx.querySelectorAll('.ptag').forEach(b=>b.onclick=()=>{curPerson=b.dataset.p;render()});
   }else ctx.innerHTML='';}
 
@@ -530,8 +539,9 @@ document.getElementById('gear').onclick=()=>{
   function draw(){
     b.innerHTML=`<div class="note">A＝社員・常駐（現場＋工場／現場が無い日は工場）。B＝常駐（工場のみ・土日休）。C＝外注（現場のみ／現場が無い日は休）。未登録は名前から推定します。</div>
       <div style="display:flex;gap:6px;margin-bottom:12px"><input id="newp" placeholder="人員を追加（例：奥井(幸)）" style="flex:1;border:1px solid var(--line);border-radius:8px;padding:7px">
-      <select id="newt">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}">${k}</option>`).join('')}</select><button class="btn gray" id="addp">追加</button></div>`+
-      allPeople().map(p=>`<div class="typesel"><span>${esc(p)}</span><select data-p="${esc(p)}">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}" ${tOf(p)===k?'selected':''}>${v}</option>`).join('')}</select></div>`).join('');
+      <select id="newt">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}">${k}</option>`).join('')}</select><button class="btn gray" id="addp">追加</button></div>
+      <div style="font-size:11px;color:var(--sub);margin-bottom:6px">※センバ・西若・応援などの会社グループは「人数つきチーム」として自動判定（現場のみ）。ここには表示しません。</div>`+
+      allPeople().filter(p=>!isGroup(p)).map(p=>`<div class="typesel"><span>${esc(p)}</span><select data-p="${esc(p)}">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}" ${tOf(p)===k?'selected':''}>${v}</option>`).join('')}</select></div>`).join('');
     b.querySelectorAll('select[data-p]').forEach(s=>s.onchange=async()=>{const np={...ptype};np[s.dataset.p]=s.value;ptype=np;
       try{await setDoc(doc(db,'config','app'),{ptype:np},{merge:true});toast('種別を保存');}catch(e){alert('保存失敗：'+e.message);}});
     b.querySelector('#addp').onclick=async()=>{const name=b.querySelector('#newp').value.trim();if(!name)return;
@@ -599,7 +609,7 @@ document.getElementById('today').onclick=()=>{const t=todayIso().slice(0,7);cons
 document.getElementById('undo').onclick=doUndo;
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));b.classList.add('on');view=b.dataset.v;
-  if(view==='person'&&!curPerson)curPerson=allPeople()[0];render();});
+  if(view==='person'&&!curPerson)curPerson=peopleDisplay()[0];render();});
 </script>
 </body>
 </html>
