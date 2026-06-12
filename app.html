@@ -408,7 +408,7 @@ let dragSrc=null;
 function wireDnD(){
   main.querySelectorAll('.chip[draggable="true"]').forEach(ch=>{
     ch.addEventListener('dragstart',e=>{e.stopPropagation();dragSrc={person:ch.dataset.person,date:ch.dataset.date,loc:ch.dataset.loc};
-      e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain',ch.dataset.person)}catch(_){}});
+      e.dataTransfer.effectAllowed='copyMove';try{e.dataTransfer.setData('text/plain',ch.dataset.person)}catch(_){}});
     ch.addEventListener('dragend',()=>{dragSrc=null;main.querySelectorAll('.lc.dragover').forEach(x=>x.classList.remove('dragover'));});
   });
   main.querySelectorAll('.lc.drop[data-loc]').forEach(cell=>{
