@@ -65,6 +65,9 @@
   .cardx{position:absolute;top:1px;right:1px;width:16px;height:16px;line-height:15px;text-align:center;
          background:rgba(0,0,0,.32);color:#fff;border-radius:50%;font-size:12px;font-weight:700;cursor:pointer}
   .cardx:hover{background:#b91c1c}
+  .lc.facg{background:#eef6ff;border-top:1px solid #cfe2ff}
+  .lc.facg .facbox2{color:#1e40af}
+  .lc.facg .chip{background:#e0e7ff;color:#3730a3}
   .lc.rest{background:#fff7ed;border-top:2px solid #fed7aa}
   .restbox{font-size:11px;color:#9a3412;font-weight:700}
   .restbox b{font-size:13px}
@@ -175,6 +178,7 @@
   <div class="spacer"></div>
   <span class="roletag" id="roletag"></span>
   <button class="ghost" id="undo" style="display:none">↩ 元に戻す</button>
+  <button class="ghost" id="bulkBtn" style="display:none">🔁 一括変更</button>
   <button class="ghost" id="gear" style="display:none">⚙ 人員設定</button>
   <button class="ghost" id="importBtn" style="display:none">⬆ 取込</button>
   <button class="ghost" id="memberBtn" style="display:none">👥 メンバー</button>
@@ -191,7 +195,7 @@
 </div></div>
 <!-- 人員設定 -->
 <div class="ov" id="ovs"><div class="modal">
-  <h3>人員設定（種別）</h3>
+  <h3>人員設定（工場メンバー：社員／外注）</h3>
   <div class="body" id="ovsBody"></div>
   <div class="foot"><button class="btn gray" id="ovsClose">閉じる</button></div>
 </div></div>
@@ -206,6 +210,18 @@
   <h3>データ取込（JSON）</h3>
   <div class="body" id="oviBody"></div>
   <div class="foot"><button class="btn gray" id="oviClose">閉じる</button></div>
+</div></div>
+<!-- 工場 出欠 -->
+<div class="ov" id="ovf"><div class="modal">
+  <h3 id="ovfTitle">自社工場の出欠</h3>
+  <div class="body" id="ovfBody"></div>
+  <div class="foot"><button class="btn gray" id="ovfClose">閉じる</button></div>
+</div></div>
+<!-- 一括変更 -->
+<div class="ov" id="ovb"><div class="modal">
+  <h3>表記の一括変更（期間指定）</h3>
+  <div class="body" id="ovbBody"></div>
+  <div class="foot"><button class="btn gray" id="ovbCancel">閉じる</button><button class="btn primary" id="ovbRun">置換する</button></div>
 </div></div>
 
 <input type="file" id="fileInput" accept=".json,application/json" style="display:none">
@@ -234,7 +250,7 @@ const TYPES={A:"A 社員・常駐（現場＋工場）",B:"B 常駐（工場の�
 const FAC='__FAC__', OFF='__OFF__';
 const WD=['日','月','火','水','木','金','土'];
 let app,auth,db, user=null, role=null;
-let data={days:[]}, ptype={}, editors=[], viewers=[];
+let data={days:[]}, ptype={}, editors=[], viewers=[], facS=[], facG=[];
 let view="site", curPerson=null, cursor=null, started=false;
 
 // ---------- boot ----------
@@ -275,6 +291,7 @@ async function onAuth(u){
   document.getElementById('gear').style.display = role==='editor'?'':'none';
   document.getElementById('importBtn').style.display = role==='editor'?'':'none';
   document.getElementById('memberBtn').style.display = role==='editor'?'':'none';
+  document.getElementById('bulkBtn').style.display = role==='editor'?'':'none';
   if(!started){ started=true; subscribe(); }
 }
 
@@ -290,7 +307,7 @@ function subscribe(){
   });
   onSnapshot(doc(db,'config','app'), s=>{
     const c=s.exists()?s.data():{};
-    ptype=c.ptype||{}; editors=c.editors||[]; viewers=c.viewers||[];
+    ptype=c.ptype||{}; editors=c.editors||[]; viewers=c.viewers||[]; facS=c.facS||[]; facG=c.facG||[];
     render();
   });
 }
@@ -320,18 +337,23 @@ function isWeekdayDate(iso){const w=jsWd(iso);return w>=1&&w<=5}
 function isWorkingDay(iso){const d=dayMap()[iso];return !!(d&&d.assignments&&d.assignments.length)}
 function offOf(iso){const d=dayMap()[iso];return new Set(d&&d.off?d.off:[])}
 function onSiteSet(iso){const d=dayMap()[iso];const s=new Set();(d?d.assignments:[]).forEach(a=>a.people.forEach(p=>s.add(p)));return s}
-function allPeople(){const s=new Set();data.days.forEach(d=>d.assignments.forEach(a=>a.people.forEach(p=>s.add(p))));Object.keys(ptype).forEach(p=>s.add(p));return [...s].sort((a,b)=>a.localeCompare(b,'ja'))}
+function allPeople(){const s=new Set();data.days.forEach(d=>d.assignments.forEach(a=>a.people.forEach(p=>s.add(p))));facS.concat(facG).forEach(p=>s.add(p));return [...s].sort((a,b)=>a.localeCompare(b,'ja'))}
 // 会社グループ（センバ/西若/応援など。人数つきの外部チーム）判定
 function baseOf(p){const m=p.match(/^(.+?)(\d+)$/);return m?m[1]:p;}
 function isGroup(p){return /\d$/.test(p)||/^(センバ|西若|応援|新興)/.test(p)||p==='+α';}
 function dispName(p){return isGroup(p)?baseOf(p):p;}
-// 人物一覧（会社グループは人数違いをまとめて1つに）
 function peopleDisplay(){const s=new Set();allPeople().forEach(p=>s.add(dispName(p)));return [...s].sort((a,b)=>a.localeCompare(b,'ja'))}
-// その日の自社工場出勤者：A=稼働日に現場が無い人／B=平日／日曜は休み・会社グループ・現場・お休みは除外
-function factoryList(iso){if(jsWd(iso)===0)return [];const on=onSiteSet(iso),off=offOf(iso),res=[];
-  allPeople().forEach(p=>{if(isGroup(p)||on.has(p)||off.has(p))return;const t=tOf(p);
-    if(t==='A'){if(isWorkingDay(iso))res.push(p);}else if(t==='B'){if(isWeekdayDate(iso))res.push(p);}});
-  return res;}
+// 工場メンバー（社員facS＋外注facG・順序つき）／それ以外＝現場のみ＝現場が無い日は休
+function facAll(){return facS.concat(facG);}
+function isFacMember(p){return facAll().includes(dispName(p));}
+function isExternal(p){return !isFacMember(p);}
+function onSiteBase(iso){const s=new Set();const d=dayMap()[iso];(d?d.assignments:[]).forEach(a=>a.people.forEach(p=>s.add(dispName(p))));return s;}
+function workSet(iso){const d=dayMap()[iso];return new Set(d&&d.work?d.work:[]);}
+// 工場在席：日＝休／土＝申告者のみ／平日＝原則在席（お休み除く）
+function present(p,iso){const w=jsWd(iso);if(w===0)return false;if(offOf(iso).has(p))return false;if(w===6)return workSet(iso).has(p);return true;}
+function factoryRows(iso){const on=onSiteBase(iso);
+  return {S:facS.filter(p=>!on.has(p)&&present(p,iso)), G:facG.filter(p=>!on.has(p)&&present(p,iso))};}
+function factoryList(iso){const r=factoryRows(iso);return r.S.concat(r.G);}
 function weekDates(iso){let s=new Date(iso+'T00:00:00');s.setDate(s.getDate()-jsWd(iso));const out=[];
   const fmtD=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
   for(let i=0;i<7;i++){out.push(fmtD(s));s.setDate(s.getDate()+1);}return out;}
@@ -366,13 +388,13 @@ function render(){
   buildCtx();
   if(view==='site')renderSite();else if(view==='person')renderPerson();else renderFactory();
 }
-function chipHtml(p,date,loc,ed){return `<span class="chip ${tOf(p)==='C'?'spot':''}" ${ed?`draggable="true" data-person="${esc(p)}" data-date="${date}" data-loc="${esc(loc)}"`:''}>${esc(p)}</span>`;}
+function chipHtml(p,date,loc,ed){return `<span class="chip ${isExternal(p)?'spot':''}" ${ed?`draggable="true" data-person="${esc(p)}" data-date="${date}" data-loc="${esc(loc)}"`:''}>${esc(p)}</span>`;}
 function renderSite(){
   const weeks=weeksOfMonth();
   if(!weeks.length){main.innerHTML='<p style="color:#6b7280">この月のデータはありません。'+(role==='editor'?'「取込」から投入できます。':'')+'</p>';return}
   const T=todayIso(),ed=role==='editor';
   let html='';
-  if(ed)html+='<div class="dndhint">編集者：マスを<b>クリック</b>で編集／名前を<b>ドラッグ</b>で移動（🏭工場・🏖休みへも、逆向きもOK）／<b>Ctrlを押しながらドラッグ＝コピー</b>（元の日にも残す）／カードの<b>×</b>でその日の現場を削除・PC向け</div>';
+  if(ed)html+='<div class="dndhint">編集者：マス<b>クリック</b>で編集／名前を<b>ドラッグ</b>で移動（🏭工場・🏖休みへも逆もOK）／<b>現場カードの名前をドラッグ</b>で現場ごと別日へ移動／<b>Ctrl＋ドラッグ＝コピー</b>／カードの<b>×</b>で当日削除／🏭工場マスのクリックで出欠ON/OFF・PC向け</div>';
   weeks.forEach(w=>{
     const lanes=weekSites(w);
     html+='<div class="week scroll"><div class="wgrid">';
@@ -383,13 +405,17 @@ function renderSite(){
       w.forEach(d=>{const a=d.assignments.find(x=>x.site===site);const t=d.date===T?'today':'';
         const sattr=`data-date="${d.date}" data-loc="${esc(site)}"`;
         if(a){const chips=a.people.map(p=>chipHtml(p,d.date,site,ed)).join('');
-          html+=`<div class="lc ${ed?'drop':'ro'} ${t}" ${sattr}><div class="site" style="background:${c}">${ed?`<span class="cardx" data-date="${d.date}" data-site="${esc(site)}" title="この日の現場を削除">×</span>`:''}<span class="nm">${esc(site)}</span>${chips}</div></div>`;}
+          html+=`<div class="lc ${ed?'drop':'ro'} ${t}" ${sattr}><div class="site" style="background:${c}" ${ed?`draggable="true" data-cardsite="${esc(site)}" data-carddate="${d.date}" title="ドラッグで現場ごと移動／Ctrlでコピー"`:''}>${ed?`<span class="cardx" data-date="${d.date}" data-site="${esc(site)}" title="この日の現場を削除">×</span>`:''}<span class="nm">${esc(site)}</span>${chips}</div></div>`;}
         else html+=`<div class="lc off ${ed?'drop':'ro'} ${t}" ${sattr}></div>`;});
     });
-    // 自社工場レーン
-    w.forEach(d=>{const t=d.date===T?'today':'';const fac=d._out?[]:factoryList(d.date);
-      const chips=fac.map(p=>chipHtml(p,d.date,FAC,ed)).join('');
-      html+=`<div class="lc fac ${ed?'drop':'ro'} ${t}" data-date="${d.date}" data-loc="${FAC}"><div class="facbox2">🏭 自社工場 <b>${fac.length}</b>名</div><div class="facn">${chips||'<span class="count">－</span>'}</div></div>`;});
+    // 自社工場レーン（社員）
+    w.forEach(d=>{const t=d.date===T?'today':'';const r=d._out?{S:[]}:factoryRows(d.date);
+      const chips=r.S.map(p=>chipHtml(p,d.date,FAC,ed)).join('');
+      html+=`<div class="lc fac ${ed?'drop':'ro'} ${t}" data-date="${d.date}" data-loc="${FAC}"><div class="facbox2">🏭 工場・社員 <b>${r.S.length}</b></div><div class="facn">${chips||'<span class="count">－</span>'}</div></div>`;});
+    // 自社工場レーン（外注）
+    w.forEach(d=>{const t=d.date===T?'today':'';const r=d._out?{G:[]}:factoryRows(d.date);
+      const chips=r.G.map(p=>chipHtml(p,d.date,FAC,ed)).join('');
+      html+=`<div class="lc facg ${ed?'drop':'ro'} ${t}" data-date="${d.date}" data-loc="${FAC}"><div class="facbox2">🏭 工場・外注 <b>${r.G.length}</b></div><div class="facn">${chips||'<span class="count">－</span>'}</div></div>`;});
     // 休みレーン
     w.forEach(d=>{const t=d.date===T?'today':'';const off=d._out?[]:[...offOf(d.date)];
       const chips=off.map(p=>chipHtml(p,d.date,OFF,ed)).join('');
@@ -398,75 +424,97 @@ function renderSite(){
   });
   main.innerHTML=html;
   if(ed){
-    main.querySelectorAll('.lc[data-loc]').forEach(el=>el.onclick=(e)=>{if(e.target.classList.contains('chip')||e.target.classList.contains('cardx'))return;openEdit(el.dataset.date);});
+    main.querySelectorAll('.lc[data-loc]').forEach(el=>el.onclick=(e)=>{if(e.target.classList.contains('chip')||e.target.classList.contains('cardx'))return;if(el.dataset.loc===FAC)openFactory(el.dataset.date);else openEdit(el.dataset.date);});
     main.querySelectorAll('.cardx').forEach(x=>x.onclick=(e)=>{e.stopPropagation();deleteCard(x.dataset.date,x.dataset.site);});
     wireDnD();
   }
 }
-// ---------- ドラッグ＆ドロップ（人員の移動・loc＝現場名/__FAC__/__OFF__）----------
+// ---------- ドラッグ＆ドロップ（人員＝チップ／現場ごと＝カード）----------
 let dragSrc=null;
 function wireDnD(){
   main.querySelectorAll('.chip[draggable="true"]').forEach(ch=>{
-    ch.addEventListener('dragstart',e=>{e.stopPropagation();dragSrc={person:ch.dataset.person,date:ch.dataset.date,loc:ch.dataset.loc};
+    ch.addEventListener('dragstart',e=>{e.stopPropagation();dragSrc={kind:'person',person:ch.dataset.person,date:ch.dataset.date,loc:ch.dataset.loc};
       e.dataTransfer.effectAllowed='copyMove';try{e.dataTransfer.setData('text/plain',ch.dataset.person)}catch(_){}});
     ch.addEventListener('dragend',()=>{dragSrc=null;main.querySelectorAll('.lc.dragover').forEach(x=>x.classList.remove('dragover'));});
+  });
+  main.querySelectorAll('.site[data-cardsite]').forEach(card=>{
+    card.addEventListener('dragstart',e=>{dragSrc={kind:'card',date:card.dataset.carddate,site:card.dataset.cardsite};
+      e.dataTransfer.effectAllowed='copyMove';try{e.dataTransfer.setData('text/plain',card.dataset.cardsite)}catch(_){}});
+    card.addEventListener('dragend',()=>{dragSrc=null;main.querySelectorAll('.lc.dragover').forEach(x=>x.classList.remove('dragover'));});
   });
   main.querySelectorAll('.lc.drop[data-loc]').forEach(cell=>{
     cell.addEventListener('dragover',e=>{if(!dragSrc)return;e.preventDefault();e.dataTransfer.dropEffect=(e.ctrlKey||e.metaKey)?'copy':'move';cell.classList.add('dragover');});
     cell.addEventListener('dragleave',()=>cell.classList.remove('dragover'));
     cell.addEventListener('drop',e=>{e.preventDefault();cell.classList.remove('dragover');if(!dragSrc)return;
-      const src=dragSrc;dragSrc=null;movePerson(src,{date:cell.dataset.date,loc:cell.dataset.loc},e.ctrlKey||e.metaKey);});
+      const src=dragSrc;dragSrc=null;const copy=e.ctrlKey||e.metaKey;
+      if(src.kind==='card')moveCard(src,cell.dataset.date,copy);
+      else movePerson(src,{date:cell.dataset.date,loc:cell.dataset.loc},copy);});
   });
 }
-function locRemove(s,person,loc){if(loc===FAC)return;if(loc===OFF){s.off=s.off.filter(p=>p!==person);return;}
+function locRemove(s,person,loc){
+  if(loc===OFF){const b=dispName(person);s.off=s.off.filter(p=>p!==b);return;}
+  if(loc===FAC){const b=dispName(person);s.work=(s.work||[]).filter(p=>p!==b);return;}
   const a=s.assignments.find(x=>x.site===loc);if(a)a.people=a.people.filter(p=>p!==person);}
-function locAdd(s,person,loc){if(loc===FAC)return;if(loc===OFF){if(!s.off.includes(person))s.off.push(person);return;}
+function locAdd(s,person,loc,iso){
+  if(loc===OFF){const b=dispName(person);if(!s.off.includes(b))s.off.push(b);s.work=(s.work||[]).filter(p=>p!==b);return;}
+  if(loc===FAC){const b=dispName(person);s.off=s.off.filter(p=>p!==b);if(jsWd(iso)===6){s.work=s.work||[];if(!s.work.includes(b))s.work.push(b);}return;}
   let a=s.assignments.find(x=>x.site===loc);if(!a){a={site:loc,people:[]};s.assignments.push(a);}if(!a.people.includes(person))a.people.push(person);}
+function dayState(dm,date){const d=dm[date];return {assignments:d?JSON.parse(JSON.stringify(d.assignments)):[],off:d&&d.off?[...d.off]:[],work:d&&d.work?[...d.work]:[]};}
 async function movePerson(src,tgt,copy){
   if(!src)return; if(src.date===tgt.date&&src.loc===tgt.loc)return;
   const isSite=tgt.loc!==FAC&&tgt.loc!==OFF, doCopy=!!copy&&isSite;
   const dm=dayMap(),state={};
-  const st=date=>{if(!(date in state)){const d=dm[date];state[date]={assignments:d?JSON.parse(JSON.stringify(d.assignments)):[],off:d&&d.off?[...d.off]:[]};}return state[date];};
+  const st=date=>{if(!(date in state))state[date]=dayState(dm,date);return state[date];};
   if(!doCopy)locRemove(st(src.date),src.person,src.loc);
-  locAdd(st(tgt.date),src.person,tgt.loc);
+  locAdd(st(tgt.date),src.person,tgt.loc,tgt.date);
   const changes={};for(const date in state)changes[date]=state[date];
   await applyDayChanges(changes, doCopy?`${src.person} をコピー`:tgt.loc===FAC?`${src.person} を工場へ`:tgt.loc===OFF?`${src.person} をお休みへ`:`${src.person} を移動`);
+}
+async function moveCard(src,tgtDate,copy){
+  if(src.date===tgtDate)return;
+  const dm=dayMap(),sd=dm[src.date];if(!sd)return;
+  const sa=sd.assignments.find(a=>a.site===src.site);if(!sa)return;
+  const people=[...sa.people],state={};
+  const st=date=>{if(!(date in state))state[date]=dayState(dm,date);return state[date];};
+  if(!copy){const s=st(src.date);s.assignments=s.assignments.filter(a=>a.site!==src.site);}
+  const tg=st(tgtDate);let ta=tg.assignments.find(a=>a.site===src.site);
+  if(!ta){ta={site:src.site,people:[]};tg.assignments.push(ta);}
+  people.forEach(p=>{if(!ta.people.includes(p))ta.people.push(p);});
+  const changes={};for(const date in state)changes[date]=state[date];
+  await applyDayChanges(changes, copy?`${src.site} をコピー`:`${src.site} を移動`);
 }
 // ---------- 変更の適用＆元に戻す ----------
 let undoStack=[];
 async function writeDay(date,val){
   const asg=(val&&val.assignments)?val.assignments.filter(a=>a.people.length>0):[];
-  const off=(val&&val.off)?val.off:[];
-  if(asg.length||off.length){const o={date,weekday:WD[jsWd(date)],assignments:asg};if(off.length)o.off=off;await setDoc(doc(db,'days',date),o);}
+  const off=(val&&val.off)?val.off:[], work=(val&&val.work)?val.work:[];
+  if(asg.length||off.length||work.length){const o={date,weekday:WD[jsWd(date)],assignments:asg};if(off.length)o.off=off;if(work.length)o.work=work;await setDoc(doc(db,'days',date),o);}
   else await deleteDoc(doc(db,'days',date));
 }
 async function applyDayChanges(changes,label){
   const dm=dayMap(),before=[];
-  for(const date in changes){const d=dm[date];before.push({date,assignments:d?JSON.parse(JSON.stringify(d.assignments)):null,off:d&&d.off?[...d.off]:null});}
+  for(const date in changes){const d=dm[date];before.push({date,assignments:d?JSON.parse(JSON.stringify(d.assignments)):null,off:d&&d.off?[...d.off]:null,work:d&&d.work?[...d.work]:null});}
   try{for(const date in changes)await writeDay(date,changes[date]);undoStack.push(before);updateUndoBtn();if(label)toast(label);}
   catch(e){alert('保存に失敗：'+e.message);}
 }
 async function doUndo(){const before=undoStack.pop();if(!before)return;
-  try{for(const b of before)await writeDay(b.date,{assignments:b.assignments||[],off:b.off||[]});updateUndoBtn();toast('元に戻しました');}
+  try{for(const b of before)await writeDay(b.date,{assignments:b.assignments||[],off:b.off||[],work:b.work||[]});updateUndoBtn();toast('元に戻しました');}
   catch(e){alert('戻すのに失敗：'+e.message);}}
 function updateUndoBtn(){const b=document.getElementById('undo');if(b)b.style.display=(role==='editor'&&undoStack.length)?'':'none';}
 async function deleteCard(date,site){const d=dayMap()[date];if(!d)return;
-  await applyDayChanges({[date]:{assignments:d.assignments.filter(a=>a.site!==site),off:d.off||[]}},`${site}（${date}）を削除`);}
+  await applyDayChanges({[date]:{assignments:d.assignments.filter(a=>a.site!==site),off:d.off||[],work:d.work||[]}},`${site}（${date}）を削除`);}
 async function deleteSiteWeek(site,iso){const dm=dayMap(),changes={};
-  weekDates(iso).forEach(date=>{const d=dm[date];if(d&&d.assignments.some(a=>a.site===site))changes[date]={assignments:d.assignments.filter(a=>a.site!==site),off:d.off||[]};});
+  weekDates(iso).forEach(date=>{const d=dm[date];if(d&&d.assignments.some(a=>a.site===site))changes[date]={assignments:d.assignments.filter(a=>a.site!==site),off:d.off||[],work:d.work||[]};});
   if(Object.keys(changes).length)await applyDayChanges(changes,`${site} を今週分まとめて削除`);}
 function personDay(iso){const d=dayMap()[iso],sel=curPerson;
   if(d){const sites=d.assignments.filter(a=>a.people.some(p=>dispName(p)===sel)).map(a=>a.site);if(sites.length)return{state:'site',sites};
-    if((d.off||[]).some(p=>dispName(p)===sel))return{state:'rest'};}
-  if(isGroup(sel))return{state:'none'};
-  const t=tOf(sel);
-  if(t==='A')return (jsWd(iso)!==0&&isWorkingDay(iso))?{state:'factory'}:{state:'none'};
-  if(t==='B')return isWeekdayDate(iso)?{state:'factory'}:{state:'rest'};
-  return{state:'rest'};}
+    if((d.off||[]).includes(sel))return{state:'rest'};}
+  if(isExternal(sel))return{state:isGroup(sel)?'none':'rest'};   // 現場のみ（会社グループは空欄）
+  return present(sel,iso)?{state:'factory'}:{state:jsWd(iso)===0?'none':'rest'};}
 function renderPerson(){
   if(!curPerson){main.innerHTML='<p style="color:#6b7280">上の人員から1名選んでください。</p>';return}
   const weeks=weeksOfMonth(),T=todayIso();let nSite=0,nFac=0,nRest=0;
-  const plabel=isGroup(curPerson)?'会社・応援（現場のみ）':TYPES[tOf(curPerson)];
+  const plabel=isGroup(curPerson)?'会社・応援（現場のみ）':isExternal(curPerson)?'外注（現場のみ）':facS.includes(curPerson)?'社員（工場メンバー）':'外注・常駐（工場メンバー）';
   let html=`<div class="week"><div class="week-h">${esc(curPerson)} さんの予定（${plabel}）</div><div class="grid">`;
   html+=WD.map((x,i)=>`<div class="mh ${i===0?'sun':''} ${i===6?'sat':''}">${x}</div>`).join('');
   weeks.forEach(w=>w.forEach(d=>{const{d:dd}=ymd(d.date);const wd=jsWd(d.date);
@@ -484,20 +532,22 @@ function renderPerson(){
 function renderFactory(){
   const weeks=weeksOfMonth(),T=todayIso();
   if(!weeks.length){main.innerHTML='<p style="color:#6b7280">この月のデータはありません。</p>';return}
-  let html=`<div class="note">「工場出勤」＝A(社員・常駐)で現場が無い日＋B(工場のみ・常駐)の平日。現場の人・お休みの人・C(外注)は除外。</div>`;
+  let html=`<div class="note">「工場出勤」＝工場メンバー(社員＋外注)で現場が無い人。日曜は休み。土曜は申告した人のみ（🏭マスのクリックで出欠ON/OFF）。お休みの人は除外。上段＝社員、下段＝外注の順。</div>`;
   html+='<div class="week"><div class="grid">';
   html+=WD.map((x,i)=>`<div class="mh ${i===0?'sun':''} ${i===6?'sat':''}">${x}</div>`).join('');
   weeks.forEach(w=>w.forEach(d=>{const{d:dd}=ymd(d.date);const wd=jsWd(d.date);
     const cls=['cellbox',wd===0?'sun':'',wd===6?'sat':'',d.date===T?'today':''].join(' ');let body='';
-    if(!d._out){const fac=factoryList(d.date);
-      if(fac.length)body=`<div class="badge factory">工場 ${fac.length}名</div><div class="names">${fac.map(esc).join('・')}</div>`;
+    if(!d._out){const r=factoryRows(d.date);const n=r.S.length+r.G.length;
+      if(n)body=`<div class="badge factory">工場 ${n}名</div>`+
+        (r.S.length?`<div class="names"><b>社</b> ${r.S.map(esc).join('・')}</div>`:'')+
+        (r.G.length?`<div class="names"><b>外</b> ${r.G.map(esc).join('・')}</div>`:'');
       else body=`<span class="count">－</span>`;}
     html+=`<div class="${cls}"><div class="dnum"><span>${dd}<span class="wd"> ${WD[wd]}</span></span></div>${body}</div>`;}));
   html+='</div></div>';main.innerHTML=html;
 }
 function buildCtx(){const ctx=document.getElementById('ctx');
   if(view==='person'){const ppl=peopleDisplay();if((!curPerson||!ppl.includes(curPerson))&&ppl.length)curPerson=ppl[0];
-    ctx.innerHTML=ppl.map(p=>`<button class="ptag ${p===curPerson?'on':''} ${(!isGroup(p)&&tOf(p)==='C')?'spot':''}" data-p="${esc(p)}">${esc(p)}</button>`).join('');
+    ctx.innerHTML=ppl.map(p=>`<button class="ptag ${p===curPerson?'on':''} ${isExternal(p)?'spot':''}" data-p="${esc(p)}">${esc(p)}</button>`).join('');
     ctx.querySelectorAll('.ptag').forEach(b=>b.onclick=()=>{curPerson=b.dataset.p;render()});
   }else ctx.innerHTML='';}
 
@@ -526,27 +576,105 @@ document.getElementById('ovSave').onclick=async()=>{
     if(s)asg.push({site:s,people:p?p.replace(/，/g,'、').split('、').map(x=>x.trim()).filter(Boolean):[]});});
   const offv=(document.getElementById('offIn').value||'').trim();
   const off=offv?offv.replace(/，/g,'、').split('、').map(x=>x.trim()).filter(Boolean):[];
+  const cur=dayMap()[editDate];const work=cur&&cur.work?cur.work:[];
   closeOv();
-  await applyDayChanges({[editDate]:{assignments:asg,off}},'保存しました');
+  await applyDayChanges({[editDate]:{assignments:asg,off,work}},'保存しました');
 };
 function closeOv(){document.getElementById('ov').classList.remove('on')}
 document.getElementById('ovCancel').onclick=closeOv;
 document.getElementById('ov').onclick=e=>{if(e.target.id==='ov')closeOv()};
 
-// ---------- 人員設定 ----------
+// ---------- 自社工場 出欠（クリックでON/OFF・土曜管理に便利）----------
+function openFactory(date){
+  if(role!=='editor')return;
+  const wd=jsWd(date);
+  document.getElementById('ovfTitle').textContent=`${date}（${WD[wd]}）の自社工場 出欠`;
+  const b=document.getElementById('ovfBody');
+  function draw(){
+    const d=dayMap()[date]||{date,assignments:[],off:[],work:[]};
+    const on=onSiteBase(date);
+    const note=wd===0?'日曜は工場休みです。':wd===6?'土曜は基本休み。出勤する人だけ「出勤」にしてください。':'平日は原則出勤。休む人を「休み」にしてください。';
+    function rowsHtml(list,title){return `<h4 style="margin:10px 0 4px">${title}</h4>`+
+      (list.length?list.map(p=>{const onsite=on.has(p);const pres=present(p,date);
+        const state=onsite?'<span style="color:#2563eb;font-weight:700">現場</span>':pres?'<span style="color:#0369a1;font-weight:700">出勤</span>':'<span style="color:#9a3412;font-weight:700">休み</span>';
+        return `<div class="memrow"><span class="em">${esc(p)} ${state}</span>`+
+          (onsite?'<span class="count">現場割当中</span>':`<button class="btn ${pres?'gray':'primary'}" data-tg="${esc(p)}">${pres?'休みにする':'出勤にする'}</button>`)+`</div>`;}).join(''):'<div class="count">対象者なし</div>');}
+    b.innerHTML=`<div class="note">${note}</div>`+rowsHtml(facS,'社員')+rowsHtml(facG,'外注');
+    b.querySelectorAll('[data-tg]').forEach(btn=>btn.onclick=async()=>{
+      const p=btn.dataset.tg, d2=dayMap()[date]||{date,assignments:[],off:[],work:[]};
+      const s={assignments:JSON.parse(JSON.stringify(d2.assignments||[])),off:[...(d2.off||[])],work:[...(d2.work||[])]};
+      if(present(p,date)){ // → 休み
+        if(!s.off.includes(p))s.off.push(p); s.work=s.work.filter(x=>x!==p);
+      }else{ // → 出勤
+        s.off=s.off.filter(x=>x!==p); if(wd===6&&!s.work.includes(p))s.work.push(p);
+      }
+      await applyDayChanges({[date]:s});draw();
+    });
+  }
+  draw();
+  document.getElementById('ovf').classList.add('on');
+}
+document.getElementById('ovfClose').onclick=()=>document.getElementById('ovf').classList.remove('on');
+document.getElementById('ovf').onclick=e=>{if(e.target.id==='ovf')document.getElementById('ovf').classList.remove('on')};
+
+// ---------- 表記の一括変更（期間指定）----------
+document.getElementById('bulkBtn').onclick=()=>{
+  const b=document.getElementById('ovbBody');
+  const months=monthsList();
+  b.innerHTML=`<div class="note">人員や会社表記を、指定範囲でまとめて置き換えます（例：西若→西若2）。空欄にすると、その表記を範囲内から削除します。現場名にも使えます。</div>
+    <div class="arow"><label>現在の表記（完全一致）</label><input id="bFrom" placeholder="例：西若"></div>
+    <div class="arow"><label>新しい表記（空欄＝削除）</label><input id="bTo" placeholder="例：西若2"></div>
+    <div class="arow"><label>範囲</label>
+      <select id="bScope" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;font-size:14px;margin-top:4px">
+        <option value="month">表示中の月（${cursor||''}）</option>
+        <option value="range">日付を指定</option>
+        <option value="all">全期間</option>
+      </select>
+      <div id="bRange" style="display:none;gap:6px;margin-top:6px">
+        <input type="date" id="bStart" style="border:1px solid var(--line);border-radius:8px;padding:7px">
+        <span>〜</span><input type="date" id="bEnd" style="border:1px solid var(--line);border-radius:8px;padding:7px"></div></div>`;
+  b.querySelector('#bScope').onchange=e=>{b.querySelector('#bRange').style.display=e.target.value==='range'?'flex':'none';};
+  document.getElementById('ovb').classList.add('on');
+};
+document.getElementById('ovbRun').onclick=async()=>{
+  const from=(document.getElementById('bFrom').value||'').trim();
+  const to=(document.getElementById('bTo').value||'').trim();
+  if(!from){alert('「現在の表記」を入力してください');return;}
+  const scope=document.getElementById('bScope').value;
+  const inRange=date=>{ if(scope==='all')return true; if(scope==='month')return monthOf(date)===cursor;
+    const s=document.getElementById('bStart').value,e=document.getElementById('bEnd').value; if(!s||!e)return false; return date>=s&&date<=e; };
+  const changes={};let cnt=0;
+  data.days.forEach(d=>{ if(!inRange(d.date))return; let hit=false;
+    const asg=JSON.parse(JSON.stringify(d.assignments)).map(a=>{
+      if(a.site===from){hit=true;a.site=to||a.site;if(!to)a._del=true;}
+      a.people=a.people.map(p=>{if(p===from){hit=true;return to;}return p;}).filter(p=>p&&p.length);
+      return a;}).filter(a=>!a._del&&(a.site));
+    if(hit){changes[d.date]={assignments:asg,off:(d.off||[]).map(p=>p===from?to:p).filter(p=>p&&p.length),work:(d.work||[]).map(p=>p===from?to:p).filter(p=>p&&p.length)};cnt++;}
+  });
+  if(!cnt){alert('該当する表記が範囲内に見つかりませんでした');return;}
+  document.getElementById('ovb').classList.remove('on');
+  await applyDayChanges(changes,`${cnt}日分を「${from}→${to||'(削除)'}」に置換`);
+};
+document.getElementById('ovbCancel').onclick=()=>document.getElementById('ovb').classList.remove('on');
+document.getElementById('ovb').onclick=e=>{if(e.target.id==='ovb')document.getElementById('ovb').classList.remove('on')};
+
+// ---------- 人員設定（工場メンバー：社員／外注・並び順）----------
+async function saveFac(){try{await setDoc(doc(db,'config','app'),{facS,facG},{merge:true});toast('保存しました');}catch(e){alert('保存失敗：'+e.message);}}
 document.getElementById('gear').onclick=()=>{
   const b=document.getElementById('ovsBody');
+  function listHtml(arr,key,title){return `<h4 style="margin:10px 0 4px">${title}（${arr.length}名・この順で左から表示）</h4>`+
+    arr.map((p,i)=>`<div class="memrow"><span class="em">${i+1}. ${esc(p)}</span><span>
+      <button class="lnk" data-mv="${key}" data-i="${i}" data-d="-1" ${i===0?'style="opacity:.3"':''}>▲</button>
+      <button class="lnk" data-mv="${key}" data-i="${i}" data-d="1" ${i===arr.length-1?'style="opacity:.3"':''}>▼</button>
+      <button class="lnk" data-rm="${key}" data-i="${i}" style="color:#b91c1c">削除</button></span></div>`).join('')+
+    `<div style="display:flex;gap:6px;margin-top:6px"><input id="add_${key}" placeholder="名前を追加" style="flex:1;border:1px solid var(--line);border-radius:8px;padding:7px"><button class="btn gray" data-add="${key}">追加</button></div>`;}
   function draw(){
-    b.innerHTML=`<div class="note">A＝社員・常駐（現場＋工場／現場が無い日は工場）。B＝常駐（工場のみ・土日休）。C＝外注（現場のみ／現場が無い日は休）。未登録は名前から推定します。</div>
-      <div style="display:flex;gap:6px;margin-bottom:12px"><input id="newp" placeholder="人員を追加（例：奥井(幸)）" style="flex:1;border:1px solid var(--line);border-radius:8px;padding:7px">
-      <select id="newt">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}">${k}</option>`).join('')}</select><button class="btn gray" id="addp">追加</button></div>
-      <div style="font-size:11px;color:var(--sub);margin-bottom:6px">※センバ・西若・応援などの会社グループは「人数つきチーム」として自動判定（現場のみ）。ここには表示しません。</div>`+
-      allPeople().filter(p=>!isGroup(p)).map(p=>`<div class="typesel"><span>${esc(p)}</span><select data-p="${esc(p)}">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}" ${tOf(p)===k?'selected':''}>${v}</option>`).join('')}</select></div>`).join('');
-    b.querySelectorAll('select[data-p]').forEach(s=>s.onchange=async()=>{const np={...ptype};np[s.dataset.p]=s.value;ptype=np;
-      try{await setDoc(doc(db,'config','app'),{ptype:np},{merge:true});toast('種別を保存');}catch(e){alert('保存失敗：'+e.message);}});
-    b.querySelector('#addp').onclick=async()=>{const name=b.querySelector('#newp').value.trim();if(!name)return;
-      const np={...ptype};np[name]=b.querySelector('#newt').value;ptype=np;
-      try{await setDoc(doc(db,'config','app'),{ptype:np},{merge:true});toast('追加しました');draw();}catch(e){alert('保存失敗：'+e.message);}};
+    b.innerHTML=`<div class="note">工場メンバーを「社員」「外注」に分けて登録。現場が無い日は自社工場勤務（日曜休み・土曜は出欠で管理）。ここに無い人（長束・西若など）は『現場のみ＝現場が無い日は休』になります。会社（センバ等）は外注に1つ登録すればOK。</div>`+
+      listHtml(facS,'S','社員')+`<hr style="border:none;border-top:1px solid var(--line);margin:12px 0">`+listHtml(facG,'G','外注');
+    const arrOf=k=>k==='S'?facS:facG;
+    b.querySelectorAll('[data-mv]').forEach(x=>x.onclick=async()=>{const a=arrOf(x.dataset.mv),i=+x.dataset.i,j=i+ +x.dataset.d;if(j<0||j>=a.length)return;[a[i],a[j]]=[a[j],a[i]];draw();await saveFac();});
+    b.querySelectorAll('[data-rm]').forEach(x=>x.onclick=async()=>{arrOf(x.dataset.rm).splice(+x.dataset.i,1);draw();await saveFac();});
+    b.querySelectorAll('[data-add]').forEach(x=>x.onclick=async()=>{const k=x.dataset.add,v=b.querySelector('#add_'+k).value.trim();if(!v)return;const a=arrOf(k);if(!a.includes(v))a.push(v);draw();await saveFac();});
   }
   draw();
   document.getElementById('ovs').classList.add('on');
@@ -574,7 +702,7 @@ document.getElementById('ovm').onclick=e=>{if(e.target.id==='ovm')document.getEl
 // ---------- 取込（JSON） ----------
 document.getElementById('importBtn').onclick=()=>{
   const b=document.getElementById('oviBody');
-  b.innerHTML=`<div class="note">JSONファイルを選ぶとFirestoreへ反映します（同じ日は上書き）。実データは端末から直接送られ、公開コードには残りません。<br>・<b>schedule.json</b>（予定）…日ごとに反映<br>・<b>roster.json</b>（人員構成 ptype）…人の種別A/B/Cを反映</div>
+  b.innerHTML=`<div class="note">JSONファイルを選ぶとFirestoreへ反映します（同じ日は上書き）。実データは端末から直接送られ、公開コードには残りません。<br>・<b>schedule.json</b>（予定）…日ごとに反映<br>・<b>roster.json</b>（工場メンバー facS/facG）…社員・外注の構成と並び順を反映</div>
     <button class="btn primary" id="pick">ファイルを選択</button><div id="impProg" style="margin-top:10px;font-size:13px"></div>`;
   b.querySelector('#pick').onclick=()=>document.getElementById('fileInput').click();
   document.getElementById('ovi').classList.add('on');
@@ -582,20 +710,21 @@ document.getElementById('importBtn').onclick=()=>{
 document.getElementById('fileInput').onchange=async(e)=>{
   const f=e.target.files[0];if(!f)return;const prog=document.getElementById('impProg');
   try{
-    const json=JSON.parse(await f.text());
-    if(json.ptype&&typeof json.ptype==='object'){
-      const np={...ptype,...json.ptype};ptype=np;
-      await setDoc(doc(db,'config','app'),{ptype:np},{merge:true});
-      prog.textContent=`人員構成：${Object.keys(json.ptype).length}名の種別を反映しました。`;toast('人員構成を取込');
+    const json=JSON.parse(await f.text());let did=false;
+    if(Array.isArray(json.facS)||Array.isArray(json.facG)){
+      const cfg={};if(Array.isArray(json.facS)){facS=json.facS;cfg.facS=json.facS;}if(Array.isArray(json.facG)){facG=json.facG;cfg.facG=json.facG;}
+      await setDoc(doc(db,'config','app'),cfg,{merge:true});
+      prog.textContent=`工場メンバー：社員${facS.length}名／外注${facG.length}名を反映しました。`;toast('人員構成を取込');did=true;
     }
     const days=json.days||(Array.isArray(json)?json:null);
     if(Array.isArray(days)){
       let n=0;for(const d of days){if(!d.date)continue;
-        const o={date:d.date,weekday:d.weekday||WD[jsWd(d.date)],assignments:d.assignments||[]};if(d.off&&d.off.length)o.off=d.off;
+        const o={date:d.date,weekday:d.weekday||WD[jsWd(d.date)],assignments:d.assignments||[]};if(d.off&&d.off.length)o.off=d.off;if(d.work&&d.work.length)o.work=d.work;
         await setDoc(doc(db,'days',d.date),o);
         n++;prog.textContent=`取込中… ${n}/${days.length}`;}
-      prog.textContent=`完了：予定${n}件を反映しました。`;toast('取込完了');
-    }else if(!json.ptype)throw new Error('days配列もptypeも見つかりません');
+      prog.textContent=`完了：予定${n}件を反映しました。`;toast('取込完了');did=true;
+    }
+    if(!did)throw new Error('days配列も facS/facG も見つかりません');
   }catch(err){prog.textContent='失敗：'+err.message;}
   e.target.value='';
 };
