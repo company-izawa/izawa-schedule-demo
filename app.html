@@ -62,6 +62,9 @@
   .lc.today{background:#fffdf5}
   .lc.out{background:#f1f5f9;cursor:default}
   .dhead.out{background:#eef2f7}
+  .lc.omon{background:#fbfcff;opacity:.72}
+  .dhead.omon{color:#94a3b8}.dhead.omon .wd{color:#94a3b8}
+  .cellbox.out{background:#f1f5f9}
   .site{border-radius:8px;padding:4px 6px;font-size:11.5px;line-height:1.35;color:#fff}
   .site .nm{font-weight:700;display:block;margin-bottom:2px;font-size:11px}
   .chip{display:inline-block;background:rgba(255,255,255,.22);border-radius:6px;
@@ -435,7 +438,7 @@ function render(){
 }
 let _rsz;window.addEventListener('resize',()=>{clearTimeout(_rsz);_rsz=setTimeout(()=>render(),200);});
 function renderSiteMobile(){
-  const days=[];weeksOfMonth().forEach(w=>w.forEach(d=>{if(!d._out)days.push(d);}));
+  const days=[];weeksOfMonth().forEach(w=>w.forEach(d=>{if(!d._out&&!d._hidden)days.push(d);}));
   if(!days.length){main.innerHTML='<p style="color:#6b7280">この月の表示がありません。</p>';return}
   const T=todayIso(),ed=role==='editor';
   let html='';
@@ -466,30 +469,30 @@ function renderSite(){
     const lanes=weekSites(w);
     html+='<div class="week scroll"><div class="wgrid">';
     w.forEach(d=>{const wd=jsWd(d.date);const{d:dd}=ymd(d.date);
-      if(d._out){html+='<div class="dhead out"></div>';return;}
-      html+=`<div class="dhead ${wd===0?'sun':''} ${wd===6?'sat':''} ${d.date===T?'today':''}">${dd}<span class="wd"> ${WD[wd]}</span></div>`;});
+      if(d._hidden){html+='<div class="dhead out"></div>';return;}
+      html+=`<div class="dhead ${wd===0?'sun':''} ${wd===6?'sat':''} ${d._out?'omon':''} ${d.date===T?'today':''}">${dd}<span class="wd"> ${WD[wd]}</span></div>`;});
     // 現場レーン
     lanes.forEach(site=>{const c=colorOf(site);
-      w.forEach(d=>{if(d._out){html+='<div class="lc out"></div>';return;}
-        const a=d.assignments.find(x=>x.site===site);const t=d.date===T?'today':'';
+      w.forEach(d=>{if(d._hidden){html+='<div class="lc out"></div>';return;}
+        const a=d.assignments.find(x=>x.site===site);const t=d.date===T?'today':'';const om=d._out?'omon':'';
         const sattr=`data-date="${d.date}" data-loc="${esc(site)}"`;
         if(a){const chips=a.people.map(p=>chipHtml(p,d.date,site,ed)).join('');
-          html+=`<div class="lc ${ed?'drop':'ro'} ${t}" ${sattr}><div class="site" style="background:${c}" ${ed?`draggable="true" data-cardsite="${esc(site)}" data-carddate="${d.date}" title="ドラッグで現場ごと移動／Ctrlでコピー"`:''}>${ed?`<span class="cardx" data-date="${d.date}" data-site="${esc(site)}" title="この日の現場を削除">×</span>`:''}<span class="nm">${esc(site)}</span>${chips}</div></div>`;}
-        else html+=`<div class="lc off ${ed?'drop':'ro'} ${t}" ${sattr}></div>`;});
+          html+=`<div class="lc ${ed?'drop':'ro'} ${t} ${om}" ${sattr}><div class="site" style="background:${c}" ${ed?`draggable="true" data-cardsite="${esc(site)}" data-carddate="${d.date}" title="ドラッグで現場ごと移動／Ctrlでコピー"`:''}>${ed?`<span class="cardx" data-date="${d.date}" data-site="${esc(site)}" title="この日の現場を削除">×</span>`:''}<span class="nm">${esc(site)}</span>${chips}</div></div>`;}
+        else html+=`<div class="lc off ${ed?'drop':'ro'} ${t} ${om}" ${sattr}></div>`;});
     });
-    // 自社工場レーン（上段＝社員。合計人数を表示）
-    w.forEach(d=>{if(d._out){html+='<div class="lc out"></div>';return;}const t=d.date===T?'today':'';const r=factoryRows(d.date);
+    // 自社工場レーン（上段＝社員。合計人数を表示。隣月のはみ出し日は空欄）
+    w.forEach(d=>{if(d._hidden){html+='<div class="lc out"></div>';return;}const t=d.date===T?'today':'';const om=d._out?'omon':'';const r=d._out?{S:[],G:[]}:factoryRows(d.date);
       const total=[...r.S,...r.G].reduce((s,p)=>s+facCount(p,d.date),0);
       const chips=r.S.map(p=>chipHtml(p,d.date,FAC,ed,facDisp(p,d.date))).join('');
-      html+=`<div class="lc fac ${ed?'drop':'ro'} ${t}" data-date="${d.date}" data-loc="${FAC}"><div class="facbox2">🏭 自社工場 <b>${total}</b>名</div><div class="facn">${chips||(r.G.length?'':'<span class="count">－</span>')}</div></div>`;});
-    // 自社工場レーン（下段＝外注。ラベル無し・仕切り線で区切る）
-    w.forEach(d=>{if(d._out){html+='<div class="lc out"></div>';return;}const t=d.date===T?'today':'';const r=factoryRows(d.date);
+      html+=`<div class="lc fac ${ed?'drop':'ro'} ${t} ${om}" data-date="${d.date}" data-loc="${FAC}"><div class="facbox2">🏭 自社工場 <b>${total}</b>名</div><div class="facn">${chips||(r.G.length?'':'<span class="count">－</span>')}</div></div>`;});
+    // 自社工場レーン（下段＝外注）
+    w.forEach(d=>{if(d._hidden){html+='<div class="lc out"></div>';return;}const t=d.date===T?'today':'';const om=d._out?'omon':'';const r=d._out?{G:[]}:factoryRows(d.date);
       const chips=r.G.map(p=>chipHtml(p,d.date,FAC,ed,facDisp(p,d.date))).join('');
-      html+=`<div class="lc facg ${ed?'drop':'ro'} ${t}" data-date="${d.date}" data-loc="${FAC}"><div class="facn">${chips||'<span class="count">　</span>'}</div></div>`;});
+      html+=`<div class="lc facg ${ed?'drop':'ro'} ${t} ${om}" data-date="${d.date}" data-loc="${FAC}"><div class="facn">${chips||'<span class="count">　</span>'}</div></div>`;});
     // 休みレーン
-    w.forEach(d=>{if(d._out){html+='<div class="lc out"></div>';return;}const t=d.date===T?'today':'';const off=[...offOf(d.date)];
+    w.forEach(d=>{if(d._hidden){html+='<div class="lc out"></div>';return;}const t=d.date===T?'today':'';const om=d._out?'omon':'';const off=d._out?[]:[...offOf(d.date)];
       const chips=off.map(p=>chipHtml(p,d.date,OFF,ed)).join('');
-      html+=`<div class="lc rest ${ed?'drop':'ro'} ${t}" data-date="${d.date}" data-loc="${OFF}"><div class="restbox">🏖 休み <b>${off.length}</b></div><div class="facn">${chips||'<span class="count">－</span>'}</div></div>`;});
+      html+=`<div class="lc rest ${ed?'drop':'ro'} ${t} ${om}" data-date="${d.date}" data-loc="${OFF}"><div class="restbox">🏖 休み <b>${off.length}</b></div><div class="facn">${chips||'<span class="count">－</span>'}</div></div>`;});
     html+='</div></div>';
   });
   main.innerHTML=html;
@@ -588,6 +591,7 @@ function renderPerson(){
   let html=`<div class="week scroll"><div class="week-h">${esc(curPerson)} さんの予定（${plabel}）</div><div class="grid gmin">`;
   html+=WD.map((x,i)=>`<div class="mh ${i===0?'sun':''} ${i===6?'sat':''}">${x}</div>`).join('');
   weeks.forEach(w=>w.forEach(d=>{const{d:dd}=ymd(d.date);const wd=jsWd(d.date);
+    if(d._hidden){html+='<div class="cellbox out"></div>';return;}
     const cls=['cellbox',wd===0?'sun':'',wd===6?'sat':'',d.date===T?'today':''].join(' ');
     const r=d._out?{state:'out'}:personDay(d.date);let body='';
     if(r.state==='site'){body=r.sites.map(s=>`<div class="badge" style="background:${colorOf(s)}">${esc(s)}</div>`).join('');nSite++;}
@@ -606,6 +610,7 @@ function renderFactory(){
   html+='<div class="week scroll"><div class="grid gmin">';
   html+=WD.map((x,i)=>`<div class="mh ${i===0?'sun':''} ${i===6?'sat':''}">${x}</div>`).join('');
   weeks.forEach(w=>w.forEach(d=>{const{d:dd}=ymd(d.date);const wd=jsWd(d.date);
+    if(d._hidden){html+='<div class="cellbox out"></div>';return;}
     const cls=['cellbox',wd===0?'sun':'',wd===6?'sat':'',d.date===T?'today':''].join(' ');let body='';
     if(!d._out){const r=factoryRows(d.date);const list=[...r.S,...r.G];
       const total=list.reduce((s,p)=>s+facCount(p,d.date),0);
