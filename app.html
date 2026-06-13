@@ -434,9 +434,10 @@ function weeksOfMonth(){
   let end=new Date(last);end.setDate(end.getDate()+(6-last.getDay()));
   const weeks=[];let cur=new Date(start);
   while(cur<=end){const row=[];for(let i=0;i<7;i++){const iso=fmtD(cur);
-    const out=monthOf(iso)!==cursor || (floor && iso<floor);
+    const om=monthOf(iso)!==cursor;          // 隣月のはみ出し（表示する）
+    const hidden=!!(floor && iso<floor);     // 記載開始日より前（隠す）
     const base=dm[iso]||{date:iso,weekday:WD[cur.getDay()],assignments:[]};
-    row.push(out?{...base,_out:true}:base);cur.setDate(cur.getDate()+1);}
+    row.push({...base,_out:om,_hidden:hidden});cur.setDate(cur.getDate()+1);}
     weeks.push(row);}
   return weeks;
 }
