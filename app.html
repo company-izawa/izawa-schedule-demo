@@ -60,6 +60,8 @@
   .lc.ro:hover{box-shadow:none;background:#fff}
   .lc.off{background:#fafbfc}
   .lc.today{background:#fffdf5}
+  .lc.out{background:#f1f5f9;cursor:default}
+  .dhead.out{background:#eef2f7}
   .site{border-radius:8px;padding:4px 6px;font-size:11.5px;line-height:1.35;color:#fff}
   .site .nm{font-weight:700;display:block;margin-bottom:2px;font-size:11px}
   .chip{display:inline-block;background:rgba(255,255,255,.22);border-radius:6px;
@@ -404,13 +406,18 @@ function weeksOfMonth(){
   // データの有無に関わらず、その月のカレンダーを常に描画（未来の月も編集可能）
   const fmtD=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
   const dm=dayMap();
+  // 記載開始日より前の空マスは表示しない（フロア＝中身のある最も早い日）
+  const cd=data.days.filter(d=>(d.assignments&&d.assignments.length)||(d.off&&d.off.length)||(d.work&&d.work.length)).map(d=>d.date).sort();
+  const floor=cd[0]||null;
   const [y,m]=cursor.split('-').map(Number);
   const first=new Date(y,m-1,1), last=new Date(y,m,0);
   let start=new Date(first);start.setDate(start.getDate()-start.getDay());
   let end=new Date(last);end.setDate(end.getDate()+(6-last.getDay()));
   const weeks=[];let cur=new Date(start);
   while(cur<=end){const row=[];for(let i=0;i<7;i++){const iso=fmtD(cur);
-    row.push(dm[iso]||{date:iso,weekday:WD[cur.getDay()],assignments:[],_out:monthOf(iso)!==cursor});cur.setDate(cur.getDate()+1);}
+    const out=monthOf(iso)!==cursor || (floor && iso<floor);
+    const base=dm[iso]||{date:iso,weekday:WD[cur.getDay()],assignments:[]};
+    row.push(out?{...base,_out:true}:base);cur.setDate(cur.getDate()+1);}
     weeks.push(row);}
   return weeks;
 }
@@ -459,26 +466,28 @@ function renderSite(){
     const lanes=weekSites(w);
     html+='<div class="week scroll"><div class="wgrid">';
     w.forEach(d=>{const wd=jsWd(d.date);const{d:dd}=ymd(d.date);
+      if(d._out){html+='<div class="dhead out"></div>';return;}
       html+=`<div class="dhead ${wd===0?'sun':''} ${wd===6?'sat':''} ${d.date===T?'today':''}">${dd}<span class="wd"> ${WD[wd]}</span></div>`;});
     // 現場レーン
     lanes.forEach(site=>{const c=colorOf(site);
-      w.forEach(d=>{const a=d.assignments.find(x=>x.site===site);const t=d.date===T?'today':'';
+      w.forEach(d=>{if(d._out){html+='<div class="lc out"></div>';return;}
+        const a=d.assignments.find(x=>x.site===site);const t=d.date===T?'today':'';
         const sattr=`data-date="${d.date}" data-loc="${esc(site)}"`;
         if(a){const chips=a.people.map(p=>chipHtml(p,d.date,site,ed)).join('');
           html+=`<div class="lc ${ed?'drop':'ro'} ${t}" ${sattr}><div class="site" style="background:${c}" ${ed?`draggable="true" data-cardsite="${esc(site)}" data-carddate="${d.date}" title="ドラッグで現場ごと移動／Ctrlでコピー"`:''}>${ed?`<span class="cardx" data-date="${d.date}" data-site="${esc(site)}" title="この日の現場を削除">×</span>`:''}<span class="nm">${esc(site)}</span>${chips}</div></div>`;}
         else html+=`<div class="lc off ${ed?'drop':'ro'} ${t}" ${sattr}></div>`;});
     });
     // 自社工場レーン（上段＝社員。合計人数を表示）
-    w.forEach(d=>{const t=d.date===T?'today':'';const r=d._out?{S:[],G:[]}:factoryRows(d.date);
+    w.forEach(d=>{if(d._out){html+='<div class="lc out"></div>';return;}const t=d.date===T?'today':'';const r=factoryRows(d.date);
       const total=[...r.S,...r.G].reduce((s,p)=>s+facCount(p,d.date),0);
       const chips=r.S.map(p=>chipHtml(p,d.date,FAC,ed,facDisp(p,d.date))).join('');
       html+=`<div class="lc fac ${ed?'drop':'ro'} ${t}" data-date="${d.date}" data-loc="${FAC}"><div class="facbox2">🏭 自社工場 <b>${total}</b>名</div><div class="facn">${chips||(r.G.length?'':'<span class="count">－</span>')}</div></div>`;});
     // 自社工場レーン（下段＝外注。ラベル無し・仕切り線で区切る）
-    w.forEach(d=>{const t=d.date===T?'today':'';const r=d._out?{G:[]}:factoryRows(d.date);
+    w.forEach(d=>{if(d._out){html+='<div class="lc out"></div>';return;}const t=d.date===T?'today':'';const r=factoryRows(d.date);
       const chips=r.G.map(p=>chipHtml(p,d.date,FAC,ed,facDisp(p,d.date))).join('');
       html+=`<div class="lc facg ${ed?'drop':'ro'} ${t}" data-date="${d.date}" data-loc="${FAC}"><div class="facn">${chips||'<span class="count">　</span>'}</div></div>`;});
     // 休みレーン
-    w.forEach(d=>{const t=d.date===T?'today':'';const off=d._out?[]:[...offOf(d.date)];
+    w.forEach(d=>{if(d._out){html+='<div class="lc out"></div>';return;}const t=d.date===T?'today':'';const off=[...offOf(d.date)];
       const chips=off.map(p=>chipHtml(p,d.date,OFF,ed)).join('');
       html+=`<div class="lc rest ${ed?'drop':'ro'} ${t}" data-date="${d.date}" data-loc="${OFF}"><div class="restbox">🏖 休み <b>${off.length}</b></div><div class="facn">${chips||'<span class="count">－</span>'}</div></div>`;});
     html+='</div></div>';
