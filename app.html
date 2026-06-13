@@ -206,6 +206,7 @@
   <div class="spacer"></div>
   <span class="roletag" id="roletag"></span>
   <button class="ghost" id="undo" style="display:none">↩ 元に戻す</button>
+  <button class="ghost" id="assignBtn" style="display:none">🧑 人員一括</button>
   <button class="ghost" id="bulkBtn" style="display:none">🔁 一括変更</button>
   <button class="ghost" id="gear" style="display:none">⚙ 人員設定</button>
   <button class="ghost" id="importBtn" style="display:none">⬆ 取込</button>
@@ -250,6 +251,12 @@
   <h3>表記の一括変更（期間指定）</h3>
   <div class="body" id="ovbBody"></div>
   <div class="foot"><button class="btn gray" id="ovbCancel">閉じる</button><button class="btn primary" id="ovbRun">置換する</button></div>
+</div></div>
+<!-- 現場に人員を一括設定 -->
+<div class="ov" id="ovp"><div class="modal">
+  <h3>現場に人員を一括設定（期間）</h3>
+  <div class="body" id="ovpBody"></div>
+  <div class="foot"><button class="btn gray" id="ovpCancel">閉じる</button><button class="btn primary" id="ovpRun">反映する</button></div>
 </div></div>
 
 <input type="file" id="fileInput" accept=".json,application/json" style="display:none">
@@ -320,6 +327,7 @@ async function onAuth(u){
   document.getElementById('importBtn').style.display = role==='editor'?'':'none';
   document.getElementById('memberBtn').style.display = role==='editor'?'':'none';
   document.getElementById('bulkBtn').style.display = role==='editor'?'':'none';
+  document.getElementById('assignBtn').style.display = role==='editor'?'':'none';
   if(!started){ started=true; subscribe(); }
 }
 
@@ -393,13 +401,13 @@ function colorOf(s){if(!siteColors[s]){siteColors[s]=PALETTE[ci%PALETTE.length];
 
 // ---------- weeks ----------
 function weeksOfMonth(){
+  // データの有無に関わらず、その月のカレンダーを常に描画（未来の月も編集可能）
   const fmtD=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
   const dm=dayMap();
-  const days=data.days.filter(d=>monthOf(d.date)===cursor);
-  if(!days.length)return[];
-  const first=days[0].date,last=days[days.length-1].date;
-  let start=new Date(first+'T00:00:00');start.setDate(start.getDate()-jsWd(first));
-  let end=new Date(last+'T00:00:00');end.setDate(end.getDate()+(6-jsWd(last)));
+  const [y,m]=cursor.split('-').map(Number);
+  const first=new Date(y,m-1,1), last=new Date(y,m,0);
+  let start=new Date(first);start.setDate(start.getDate()-start.getDay());
+  let end=new Date(last);end.setDate(end.getDate()+(6-last.getDay()));
   const weeks=[];let cur=new Date(start);
   while(cur<=end){const row=[];for(let i=0;i<7;i++){const iso=fmtD(cur);
     row.push(dm[iso]||{date:iso,weekday:WD[cur.getDay()],assignments:[],_out:monthOf(iso)!==cursor});cur.setDate(cur.getDate()+1);}
@@ -420,8 +428,8 @@ function render(){
 }
 let _rsz;window.addEventListener('resize',()=>{clearTimeout(_rsz);_rsz=setTimeout(()=>render(),200);});
 function renderSiteMobile(){
-  const days=data.days.filter(d=>monthOf(d.date)===cursor);
-  if(!days.length){main.innerHTML='<p style="color:#6b7280">この月のデータはありません。'+(role==='editor'?'「取込」から投入できます。':'')+'</p>';return}
+  const days=[];weeksOfMonth().forEach(w=>w.forEach(d=>{if(!d._out)days.push(d);}));
+  if(!days.length){main.innerHTML='<p style="color:#6b7280">この月の表示がありません。</p>';return}
   const T=todayIso(),ed=role==='editor';
   let html='';
   if(ed)html+='<div class="dndhint">スマホは各日を<b>タップ</b>で編集できます（並べ替えのドラッグはPC向け）。</div>';
@@ -718,6 +726,38 @@ document.getElementById('ovbRun').onclick=async()=>{
 };
 document.getElementById('ovbCancel').onclick=()=>document.getElementById('ovb').classList.remove('on');
 document.getElementById('ovb').onclick=e=>{if(e.target.id==='ovb')document.getElementById('ovb').classList.remove('on')};
+
+// ---------- 現場に人員を一括設定（確定済みの現場へ、期間まとめて）----------
+document.getElementById('assignBtn').onclick=()=>{
+  const b=document.getElementById('ovpBody');
+  const sites=[...new Set(data.days.flatMap(d=>d.assignments.map(a=>a.site)))].sort((a,b)=>a.localeCompare(b,'ja'));
+  b.innerHTML=`<div class="note">スケジュール確定済みの現場に、人員をまとめて入れます。選んだ現場が出てくる全日（範囲内）に同じ人員を設定します。会社＋人数表記OK（例：センバ4）。</div>
+   <div class="arow"><label>現場</label><select id="pSite" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;font-size:14px;margin-top:4px">${sites.length?sites.map(s=>`<option>${esc(s)}</option>`).join(''):'<option disabled>現場がありません</option>'}</select></div>
+   <div class="arow"><label>人員（、区切り）</label><input id="pPeople" placeholder="例：亀井、牧野、センバ4"></div>
+   <div class="arow"><label>範囲</label><select id="pScope" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;font-size:14px;margin-top:4px">
+     <option value="all">この現場の全日程</option><option value="month">表示中の月（${cursor||''}）</option><option value="range">日付を指定</option></select>
+     <div id="pRange" style="display:none;gap:6px;margin-top:6px"><input type="date" id="pStart" style="border:1px solid var(--line);border-radius:8px;padding:7px"><span>〜</span><input type="date" id="pEnd" style="border:1px solid var(--line);border-radius:8px;padding:7px"></div></div>
+   <label style="display:flex;gap:6px;align-items:center;font-size:13px;margin-top:4px"><input type="checkbox" id="pSkip" checked> 既に人員が入っている日は変えない（空欄の日だけ入れる）</label>`;
+  b.querySelector('#pScope').onchange=e=>{b.querySelector('#pRange').style.display=e.target.value==='range'?'flex':'none';};
+  document.getElementById('ovp').classList.add('on');
+};
+document.getElementById('ovpRun').onclick=async()=>{
+  const site=document.getElementById('pSite').value;if(!site){alert('現場がありません');return;}
+  const pv=(document.getElementById('pPeople').value||'').trim();
+  const people=pv?pv.replace(/，/g,'、').split('、').map(x=>x.trim()).filter(Boolean):[];
+  const scope=document.getElementById('pScope').value, skip=document.getElementById('pSkip').checked;
+  const inRange=date=>{ if(scope==='all')return true; if(scope==='month')return monthOf(date)===cursor;
+    const s=document.getElementById('pStart').value,e=document.getElementById('pEnd').value; if(!s||!e)return false; return date>=s&&date<=e; };
+  const changes={};let cnt=0;
+  data.days.forEach(d=>{ if(!inRange(d.date))return; const a=d.assignments.find(x=>x.site===site); if(!a)return;
+    if(skip&&a.people.length>0)return;
+    changes[d.date]={assignments:d.assignments.map(x=>x.site===site?{site,people:[...people]}:{site:x.site,people:[...x.people]}),off:d.off||[],work:d.work||[]};cnt++;});
+  if(!cnt){alert('該当する日がありませんでした（範囲内にその現場が無い／既に人員あり）');return;}
+  document.getElementById('ovp').classList.remove('on');
+  await applyDayChanges(changes,`${site} の人員を${cnt}日分に反映`);
+};
+document.getElementById('ovpCancel').onclick=()=>document.getElementById('ovp').classList.remove('on');
+document.getElementById('ovp').onclick=e=>{if(e.target.id==='ovp')document.getElementById('ovp').classList.remove('on')};
 
 // ---------- 人員設定（工場メンバー：社員／外注・並び順）----------
 async function saveFac(){try{await setDoc(doc(db,'config','app'),{facS,facG},{merge:true});toast('保存しました');}catch(e){alert('保存失敗：'+e.message);}}
