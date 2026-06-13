@@ -2,8 +2,16 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>井澤鉄工所 社内日程表</title>
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="社内日程表">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<link rel="manifest" href="manifest.json">
 <style>
   :root{
     --bg:#f4f6f9; --panel:#ffffff; --line:#e3e8ef; --ink:#1f2937; --sub:#6b7280;
@@ -134,7 +142,27 @@
   .toast.on{opacity:1}
   .memrow{display:flex;align-items:center;gap:8px;justify-content:space-between;padding:7px 0;border-bottom:1px dashed var(--line)}
   .memrow .em{font-size:13px}
-  @media(max-width:760px){header h1{font-size:14px}.tabs button{padding:7px 10px}}
+  /* スマホ向け：現場ビューは縦並びカード */
+  .mday{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);margin-bottom:12px;overflow:hidden}
+  .mday.today{border-color:#f59e0b;box-shadow:0 0 0 2px #fde68a}
+  .mday-h{padding:9px 14px;font-weight:800;font-size:15px;background:#f8fafc;border-bottom:1px solid var(--line)}
+  .mday-h.sun{color:#dc2626;background:#fef2f2}.mday-h.sat{color:#2563eb;background:#eff6ff}
+  .todaytag{font-size:11px;background:#f59e0b;color:#fff;border-radius:10px;padding:1px 8px;margin-left:6px;vertical-align:middle}
+  .mday-b{padding:10px 12px}
+  .msite{padding:7px 10px;margin-bottom:8px;background:#fafbff;border-radius:8px}
+  .msite-n{font-weight:800;font-size:14px;margin-bottom:4px}
+  .mchip{display:inline-block;background:#eef2f7;border-radius:7px;padding:3px 9px;margin:2px 4px 2px 0;font-size:13px}
+  .mfac{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);font-size:13px;color:#0369a1;font-weight:700}
+  .mfac .facn,.mrest .facn{font-weight:500;color:#334155}
+  .mrest{margin-top:6px;font-size:13px;color:#9a3412;font-weight:700}
+  .mfac b{font-size:16px}
+  @media(max-width:760px){
+    header h1{font-size:14px}.tabs{width:100%;justify-content:center}.tabs button{flex:1;padding:9px 6px}
+    .toolbar{gap:6px}.toolbar .cur{min-width:96px;font-size:14px}
+    .grid.gmin{min-width:660px}
+    main{padding:10px}
+    .ptag{padding:7px 12px;font-size:14px}
+  }
 </style>
 </head>
 <body>
@@ -250,7 +278,7 @@ const TYPES={A:"A 社員・常駐（現場＋工場）",B:"B 常駐（工場の�
 const FAC='__FAC__', OFF='__OFF__';
 const WD=['日','月','火','水','木','金','土'];
 let app,auth,db, user=null, role=null;
-let data={days:[]}, ptype={}, editors=[], viewers=[], facS=[], facG=[];
+let data={days:[]}, ptype={}, editors=[], viewers=[], facS=[], facG=[], gc={};
 let view="site", curPerson=null, cursor=null, started=false;
 
 // ---------- boot ----------
@@ -307,7 +335,7 @@ function subscribe(){
   });
   onSnapshot(doc(db,'config','app'), s=>{
     const c=s.exists()?s.data():{};
-    ptype=c.ptype||{}; editors=c.editors||[]; viewers=c.viewers||[]; facS=c.facS||[]; facG=c.facG||[];
+    ptype=c.ptype||{}; editors=c.editors||[]; viewers=c.viewers||[]; facS=c.facS||[]; facG=c.facG||[]; gc=c.gc||{};
     render();
   });
 }
@@ -382,13 +410,37 @@ function weekSites(w){const order=[],seen=new Set();w.forEach(d=>d.assignments.f
 
 // ---------- render ----------
 const main=document.getElementById('main');
+function isMobile(){return window.innerWidth<=700;}
 function render(){
   if(!cursor)return;
   document.getElementById('curMonth').textContent=cursor.replace('-','年')+'月';
   buildCtx();
-  if(view==='site')renderSite();else if(view==='person')renderPerson();else renderFactory();
+  if(view==='site'){isMobile()?renderSiteMobile():renderSite();}
+  else if(view==='person')renderPerson();else renderFactory();
 }
-function chipHtml(p,date,loc,ed){return `<span class="chip ${isExternal(p)?'spot':''}" ${ed?`draggable="true" data-person="${esc(p)}" data-date="${date}" data-loc="${esc(loc)}"`:''}>${esc(p)}</span>`;}
+let _rsz;window.addEventListener('resize',()=>{clearTimeout(_rsz);_rsz=setTimeout(()=>render(),200);});
+function renderSiteMobile(){
+  const days=data.days.filter(d=>monthOf(d.date)===cursor);
+  if(!days.length){main.innerHTML='<p style="color:#6b7280">この月のデータはありません。'+(role==='editor'?'「取込」から投入できます。':'')+'</p>';return}
+  const T=todayIso(),ed=role==='editor';
+  let html='';
+  if(ed)html+='<div class="dndhint">スマホは各日を<b>タップ</b>で編集できます（並べ替えのドラッグはPC向け）。</div>';
+  days.forEach(d=>{const wd=jsWd(d.date);const{m,d:dd}=ymd(d.date);
+    const r=factoryRows(d.date);const list=[...r.S,...r.G];const total=list.reduce((s,p)=>s+facCount(p,d.date),0);
+    const off=d.off||[];let inner='';
+    d.assignments.forEach(a=>{const c=colorOf(a.site);
+      inner+=`<div class="msite" style="border-left:5px solid ${c}"><div class="msite-n" style="color:${c}">${esc(a.site)}</div><div>${a.people.map(p=>`<span class="mchip">${esc(p)}</span>`).join('')}</div></div>`;});
+    inner+=`<div class="mfac">🏭 自社工場 <b>${total}</b>名　<span class="facn">${list.map(p=>esc(facDisp(p,d.date))).join('・')||'－'}</span></div>`;
+    if(off.length)inner+=`<div class="mrest">🏖 休み　<span class="facn">${off.map(esc).join('・')}</span></div>`;
+    html+=`<div class="mday ${d.date===T?'today':''}" data-date="${d.date}"><div class="mday-h ${wd===0?'sun':''} ${wd===6?'sat':''}">${m}/${dd}（${WD[wd]}）${d.date===T?' <span class="todaytag">今日</span>':''}</div><div class="mday-b">${inner}</div></div>`;});
+  main.innerHTML=html;
+  if(ed)main.querySelectorAll('.mday').forEach(el=>el.onclick=()=>openEdit(el.dataset.date));
+}
+function chipHtml(p,date,loc,ed,disp){return `<span class="chip ${isExternal(p)?'spot':''}" ${ed?`draggable="true" data-person="${esc(p)}" data-date="${date}" data-loc="${esc(loc)}"`:''}>${esc(disp||p)}</span>`;}
+// 会社グループの工場人数（this date時点で有効な人数。ルール gc[base]=[{from,n}] の最新適用）
+function effectiveCount(base,iso){const rules=(gc[base]||[]).slice().sort((a,b)=>a.from<b.from?-1:1);let n=1;for(const r of rules)if(r.from<=iso)n=r.n;return n;}
+function facCount(p,iso){return isGroup(p)?effectiveCount(dispName(p),iso):1;}
+function facDisp(p,iso){return isGroup(p)?dispName(p)+effectiveCount(dispName(p),iso):p;}
 function renderSite(){
   const weeks=weeksOfMonth();
   if(!weeks.length){main.innerHTML='<p style="color:#6b7280">この月のデータはありません。'+(role==='editor'?'「取込」から投入できます。':'')+'</p>';return}
@@ -408,14 +460,15 @@ function renderSite(){
           html+=`<div class="lc ${ed?'drop':'ro'} ${t}" ${sattr}><div class="site" style="background:${c}" ${ed?`draggable="true" data-cardsite="${esc(site)}" data-carddate="${d.date}" title="ドラッグで現場ごと移動／Ctrlでコピー"`:''}>${ed?`<span class="cardx" data-date="${d.date}" data-site="${esc(site)}" title="この日の現場を削除">×</span>`:''}<span class="nm">${esc(site)}</span>${chips}</div></div>`;}
         else html+=`<div class="lc off ${ed?'drop':'ro'} ${t}" ${sattr}></div>`;});
     });
-    // 自社工場レーン（社員）
-    w.forEach(d=>{const t=d.date===T?'today':'';const r=d._out?{S:[]}:factoryRows(d.date);
-      const chips=r.S.map(p=>chipHtml(p,d.date,FAC,ed)).join('');
-      html+=`<div class="lc fac ${ed?'drop':'ro'} ${t}" data-date="${d.date}" data-loc="${FAC}"><div class="facbox2">🏭 工場・社員 <b>${r.S.length}</b></div><div class="facn">${chips||'<span class="count">－</span>'}</div></div>`;});
-    // 自社工場レーン（外注）
+    // 自社工場レーン（上段＝社員。合計人数を表示）
+    w.forEach(d=>{const t=d.date===T?'today':'';const r=d._out?{S:[],G:[]}:factoryRows(d.date);
+      const total=[...r.S,...r.G].reduce((s,p)=>s+facCount(p,d.date),0);
+      const chips=r.S.map(p=>chipHtml(p,d.date,FAC,ed,facDisp(p,d.date))).join('');
+      html+=`<div class="lc fac ${ed?'drop':'ro'} ${t}" data-date="${d.date}" data-loc="${FAC}"><div class="facbox2">🏭 自社工場 <b>${total}</b>名</div><div class="facn">${chips||(r.G.length?'':'<span class="count">－</span>')}</div></div>`;});
+    // 自社工場レーン（下段＝外注。ラベル無し・仕切り線で区切る）
     w.forEach(d=>{const t=d.date===T?'today':'';const r=d._out?{G:[]}:factoryRows(d.date);
-      const chips=r.G.map(p=>chipHtml(p,d.date,FAC,ed)).join('');
-      html+=`<div class="lc facg ${ed?'drop':'ro'} ${t}" data-date="${d.date}" data-loc="${FAC}"><div class="facbox2">🏭 工場・外注 <b>${r.G.length}</b></div><div class="facn">${chips||'<span class="count">－</span>'}</div></div>`;});
+      const chips=r.G.map(p=>chipHtml(p,d.date,FAC,ed,facDisp(p,d.date))).join('');
+      html+=`<div class="lc facg ${ed?'drop':'ro'} ${t}" data-date="${d.date}" data-loc="${FAC}"><div class="facn">${chips||'<span class="count">　</span>'}</div></div>`;});
     // 休みレーン
     w.forEach(d=>{const t=d.date===T?'today':'';const off=d._out?[]:[...offOf(d.date)];
       const chips=off.map(p=>chipHtml(p,d.date,OFF,ed)).join('');
@@ -515,7 +568,7 @@ function renderPerson(){
   if(!curPerson){main.innerHTML='<p style="color:#6b7280">上の人員から1名選んでください。</p>';return}
   const weeks=weeksOfMonth(),T=todayIso();let nSite=0,nFac=0,nRest=0;
   const plabel=isGroup(curPerson)?'会社・応援（現場のみ）':isExternal(curPerson)?'外注（現場のみ）':facS.includes(curPerson)?'社員（工場メンバー）':'外注・常駐（工場メンバー）';
-  let html=`<div class="week"><div class="week-h">${esc(curPerson)} さんの予定（${plabel}）</div><div class="grid">`;
+  let html=`<div class="week scroll"><div class="week-h">${esc(curPerson)} さんの予定（${plabel}）</div><div class="grid gmin">`;
   html+=WD.map((x,i)=>`<div class="mh ${i===0?'sun':''} ${i===6?'sat':''}">${x}</div>`).join('');
   weeks.forEach(w=>w.forEach(d=>{const{d:dd}=ymd(d.date);const wd=jsWd(d.date);
     const cls=['cellbox',wd===0?'sun':'',wd===6?'sat':'',d.date===T?'today':''].join(' ');
@@ -532,15 +585,14 @@ function renderPerson(){
 function renderFactory(){
   const weeks=weeksOfMonth(),T=todayIso();
   if(!weeks.length){main.innerHTML='<p style="color:#6b7280">この月のデータはありません。</p>';return}
-  let html=`<div class="note">「工場出勤」＝工場メンバー(社員＋外注)で現場が無い人。日曜は休み。土曜は申告した人のみ（🏭マスのクリックで出欠ON/OFF）。お休みの人は除外。上段＝社員、下段＝外注の順。</div>`;
-  html+='<div class="week"><div class="grid">';
+  let html=`<div class="note">「自社工場」＝工場メンバーで現場が無い人。日曜は休み。土曜は申告した人のみ（現場ビューの🏭マスのクリックで出欠ON/OFF）。人数は会社（センバ等）の人数も合算。</div>`;
+  html+='<div class="week scroll"><div class="grid gmin">';
   html+=WD.map((x,i)=>`<div class="mh ${i===0?'sun':''} ${i===6?'sat':''}">${x}</div>`).join('');
   weeks.forEach(w=>w.forEach(d=>{const{d:dd}=ymd(d.date);const wd=jsWd(d.date);
     const cls=['cellbox',wd===0?'sun':'',wd===6?'sat':'',d.date===T?'today':''].join(' ');let body='';
-    if(!d._out){const r=factoryRows(d.date);const n=r.S.length+r.G.length;
-      if(n)body=`<div class="badge factory">工場 ${n}名</div>`+
-        (r.S.length?`<div class="names"><b>社</b> ${r.S.map(esc).join('・')}</div>`:'')+
-        (r.G.length?`<div class="names"><b>外</b> ${r.G.map(esc).join('・')}</div>`:'');
+    if(!d._out){const r=factoryRows(d.date);const list=[...r.S,...r.G];
+      const total=list.reduce((s,p)=>s+facCount(p,d.date),0);
+      if(list.length)body=`<div class="badge factory">工場 ${total}名</div><div class="names">${list.map(p=>esc(facDisp(p,d.date))).join('・')}</div>`;
       else body=`<span class="count">－</span>`;}
     html+=`<div class="${cls}"><div class="dnum"><span>${dd}<span class="wd"> ${WD[wd]}</span></span></div>${body}</div>`;}));
   html+='</div></div>';main.innerHTML=html;
@@ -597,22 +649,31 @@ function openFactory(date){
     function rowsHtml(list,title){return `<h4 style="margin:10px 0 4px">${title}</h4>`+
       (list.length?list.map(p=>{const onsite=on.has(p);const pres=present(p,date);
         const state=onsite?'<span style="color:#2563eb;font-weight:700">現場</span>':pres?'<span style="color:#0369a1;font-weight:700">出勤</span>':'<span style="color:#9a3412;font-weight:700">休み</span>';
-        return `<div class="memrow"><span class="em">${esc(p)} ${state}</span>`+
-          (onsite?'<span class="count">現場割当中</span>':`<button class="btn ${pres?'gray':'primary'}" data-tg="${esc(p)}">${pres?'休みにする':'出勤にする'}</button>`)+`</div>`;}).join(''):'<div class="count">対象者なし</div>');}
+        const disp=isGroup(p)?p+effectiveCount(p,date):p;
+        let row=`<div class="memrow"><span class="em">${esc(disp)} ${state}</span>`+
+          (onsite?'<span class="count">現場割当中</span>':`<button class="btn ${pres?'gray':'primary'}" data-tg="${esc(p)}">${pres?'休みにする':'出勤にする'}</button>`)+`</div>`;
+        if(isGroup(p)&&!onsite&&pres)row+=`<div class="memrow" style="padding-left:10px"><span class="count">↳ ${esc(p)}の工場人数（この日から）</span><span><input type="number" min="1" value="${effectiveCount(p,date)}" data-gci="${esc(p)}" style="width:54px;border:1px solid var(--line);border-radius:7px;padding:5px"><button class="btn gray" data-gc="${esc(p)}">変更</button></span></div>`;
+        return row;}).join(''):'<div class="count">対象者なし</div>');}
     b.innerHTML=`<div class="note">${note}</div>`+rowsHtml(facS,'社員')+rowsHtml(facG,'外注');
     b.querySelectorAll('[data-tg]').forEach(btn=>btn.onclick=async()=>{
       const p=btn.dataset.tg, d2=dayMap()[date]||{date,assignments:[],off:[],work:[]};
       const s={assignments:JSON.parse(JSON.stringify(d2.assignments||[])),off:[...(d2.off||[])],work:[...(d2.work||[])]};
-      if(present(p,date)){ // → 休み
-        if(!s.off.includes(p))s.off.push(p); s.work=s.work.filter(x=>x!==p);
-      }else{ // → 出勤
-        s.off=s.off.filter(x=>x!==p); if(wd===6&&!s.work.includes(p))s.work.push(p);
-      }
+      if(present(p,date)){ if(!s.off.includes(p))s.off.push(p); s.work=s.work.filter(x=>x!==p); }
+      else{ s.off=s.off.filter(x=>x!==p); if(wd===6&&!s.work.includes(p))s.work.push(p); }
       await applyDayChanges({[date]:s});draw();
+    });
+    b.querySelectorAll('[data-gc]').forEach(btn=>btn.onclick=async()=>{
+      const p=btn.dataset.gc, n=parseInt(b.querySelector(`[data-gci="${p}"]`).value,10);
+      if(!n||n<1)return; await setGroupCount(p,date,n); draw();
     });
   }
   draw();
   document.getElementById('ovf').classList.add('on');
+}
+async function setGroupCount(base,fromDate,n){
+  const rules=(gc[base]||[]).filter(r=>r.from!==fromDate);rules.push({from:fromDate,n});
+  rules.sort((a,b)=>a.from<b.from?-1:1);gc={...gc,[base]:rules};
+  try{await setDoc(doc(db,'config','app'),{gc},{merge:true});toast(`${base}＝${n}名（${fromDate}〜）`);}catch(e){alert('保存失敗：'+e.message);}
 }
 document.getElementById('ovfClose').onclick=()=>document.getElementById('ovf').classList.remove('on');
 document.getElementById('ovf').onclick=e=>{if(e.target.id==='ovf')document.getElementById('ovf').classList.remove('on')};
