@@ -724,7 +724,7 @@ async function saveFac(){try{await setDoc(doc(db,'config','app'),{facS,facG},{me
 document.getElementById('gear').onclick=()=>{
   const b=document.getElementById('ovsBody');
   function listHtml(arr,key,title){return `<h4 style="margin:10px 0 4px">${title}（${arr.length}名・この順で左から表示）</h4>`+
-    arr.map((p,i)=>`<div class="memrow"><span class="em">${i+1}. ${esc(p)}</span><span>
+    arr.map((p,i)=>`<div class="memrow"><span class="em">${i+1}. ${esc(p)}${isGroup(p)?` <input type="number" min="1" value="${effectiveCount(p,'2000-01-01')}" data-gcb="${esc(p)}" title="既定の工場人数" style="width:48px;border:1px solid var(--line);border-radius:6px;padding:3px"> 名`:''}</span><span>
       <button class="lnk" data-mv="${key}" data-i="${i}" data-d="-1" ${i===0?'style="opacity:.3"':''}>▲</button>
       <button class="lnk" data-mv="${key}" data-i="${i}" data-d="1" ${i===arr.length-1?'style="opacity:.3"':''}>▼</button>
       <button class="lnk" data-rm="${key}" data-i="${i}" style="color:#b91c1c">削除</button></span></div>`).join('')+
@@ -736,6 +736,7 @@ document.getElementById('gear').onclick=()=>{
     b.querySelectorAll('[data-mv]').forEach(x=>x.onclick=async()=>{const a=arrOf(x.dataset.mv),i=+x.dataset.i,j=i+ +x.dataset.d;if(j<0||j>=a.length)return;[a[i],a[j]]=[a[j],a[i]];draw();await saveFac();});
     b.querySelectorAll('[data-rm]').forEach(x=>x.onclick=async()=>{arrOf(x.dataset.rm).splice(+x.dataset.i,1);draw();await saveFac();});
     b.querySelectorAll('[data-add]').forEach(x=>x.onclick=async()=>{const k=x.dataset.add,v=b.querySelector('#add_'+k).value.trim();if(!v)return;const a=arrOf(k);if(!a.includes(v))a.push(v);draw();await saveFac();});
+    b.querySelectorAll('[data-gcb]').forEach(inp=>inp.onchange=async()=>{const base=inp.dataset.gcb,n=parseInt(inp.value,10);if(!n||n<1)return;await setGroupCount(base,'2000-01-01',n);});
   }
   draw();
   document.getElementById('ovs').classList.add('on');
